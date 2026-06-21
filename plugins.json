@@ -33,6 +33,16 @@
       "repo": "https://github.com/detain/phlix-plugin-trakt",
       "author": "detain",
       "tags": ["scrobbler", "trakt"]
+    },
+    {
+      "name": "phlix-plugin-lastfm",
+      "title": "Last.fm",
+      "type": "scrobbler",
+      "summary": "Scrobble music playback to Last.fm.",
+      "description": "Last.fm scrobbler — scrobbles music playback to Last.fm, marking now-playing on start and submitting the scrobble at the end.",
+      "repo": "https://github.com/detain/phlix-plugin-lastfm",
+      "author": "detain",
+      "tags": ["scrobbler", "lastfm", "music"]
     }
   ]
 }
