@@ -14,6 +14,7 @@ single plugin repo URL directly.
 | AniDB | metadata-provider | [phlix-plugin-anidb](https://github.com/detain/phlix-plugin-anidb) |
 | MyAnimeList | metadata-provider | [phlix-plugin-myanimelist](https://github.com/detain/phlix-plugin-myanimelist) |
 | Trakt | scrobbler | [phlix-plugin-trakt](https://github.com/detain/phlix-plugin-trakt) |
+| Last.fm | scrobbler | [phlix-plugin-lastfm](https://github.com/detain/phlix-plugin-lastfm) |
 
 ## Catalog format (`plugins.json`)
 
