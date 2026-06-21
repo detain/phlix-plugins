@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "name": "Phlix Official Plugins",
+  "description": "The default plugin catalog for Phlix. Add this as a plugin source in the admin Plugins section, then install plugins straight from the list.",
+  "homepage": "https://github.com/detain/phlix-plugins",
+  "plugins": [
+    {
+      "name": "phlix-plugin-anidb",
+      "title": "AniDB",
+      "type": "metadata-provider",
+      "summary": "Anime metadata from AniDB.",
+      "description": "AniDB metadata provider — anime titles, descriptions, episodes and ratings via the AniDB UDP API and daily title dump.",
+      "repo": "https://github.com/detain/phlix-plugin-anidb",
+      "author": "detain",
+      "tags": ["anime", "metadata"]
+    },
+    {
+      "name": "phlix-plugin-myanimelist",
+      "title": "MyAnimeList",
+      "type": "metadata-provider",
+      "summary": "Anime & manga metadata from MyAnimeList.",
+      "description": "MyAnimeList metadata provider — anime/manga search, details and rankings via the MAL API v2.",
+      "repo": "https://github.com/detain/phlix-plugin-myanimelist",
+      "author": "detain",
+      "tags": ["anime", "manga", "metadata"]
+    },
+    {
+      "name": "phlix-plugin-trakt",
+      "title": "Trakt",
+      "type": "scrobbler",
+      "summary": "Scrobble playback to Trakt.tv.",
+      "description": "Trakt scrobbler — scrobbles playback to Trakt.tv and syncs watch history over the Trakt OAuth API.",
+      "repo": "https://github.com/detain/phlix-plugin-trakt",
+      "author": "detain",
+      "tags": ["scrobbler", "trakt"]
+    }
+  ]
+}
