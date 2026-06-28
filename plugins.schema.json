@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/detain/phlix-plugins/HEAD/plugins.schema.json",
+  "title": "Phlix plugin catalog",
+  "description": "Schema for a Phlix plugin catalog document (plugins.json). The catalog is the trust root the Phlix server reads to drive admin plugin installs; each entry pins an exact commit (ref) and the sha256 of the codeload tarball for that commit (artifactSha256) so the server can verify the bytes it downloads before installing.",
+  "type": "object",
+  "required": ["schemaVersion", "name", "plugins"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "description": "Catalog format version. Version 2 introduces the per-entry pin (ref + artifactSha256 + version).",
+      "const": 2
+    },
+    "name": {
+      "description": "Human-readable catalog name.",
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "description": "Optional long description of the catalog.",
+      "type": "string"
+    },
+    "homepage": {
+      "description": "Optional catalog homepage URL.",
+      "type": "string",
+      "format": "uri"
+    },
+    "plugins": {
+      "description": "The plugins this catalog offers. At least one.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/plugin" }
+    }
+  },
+  "$defs": {
+    "plugin": {
+      "type": "object",
+      "required": ["name", "title", "type", "repo", "ref", "artifactSha256", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "Plugin manifest name. MUST match the server's HttpInstaller::guardPluginName() regex byte-for-byte.",
+          "type": "string",
+          "pattern": "^phlix-plugin-[a-z0-9][a-z0-9-]*$"
+        },
+        "title": {
+          "description": "Display name shown in the admin Plugins UI.",
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "description": "Plugin category. Enum so typos fail validation.",
+          "type": "string",
+          "enum": [
+            "metadata-provider",
+            "scrobbler",
+            "subtitle-provider",
+            "notifier",
+            "player",
+            "integration"
+          ]
+        },
+        "summary": {
+          "description": "Optional one-line description.",
+          "type": "string"
+        },
+        "description": {
+          "description": "Optional long description.",
+          "type": "string"
+        },
+        "repo": {
+          "description": "Human repository URL. For the official catalog this is constrained to github.com under the detain/ org. A forked catalog can relax this pattern.",
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://github\\.com/detain/phlix-plugin-[a-z0-9][a-z0-9-]*/?$"
+        },
+        "ref": {
+          "description": "The 40-char lowercase commit sha this entry is pinned to (an exact commit in the plugin repo, never a branch or tag). The server downloads /archive/<ref>.tar.gz, not HEAD.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "artifactSha256": {
+          "description": "Bare 64-hex sha256 of the codeload tarball at the pinned ref (github.com/<owner>/<repo>/archive/<ref>.tar.gz). No 'sha256:' prefix. MUST move in lockstep with ref.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "version": {
+          "description": "The plugin's semver at the pinned ref (read from its plugin.json).",
+          "type": "string",
+          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-(?:(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+[0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*)?$"
+        },
+        "author": {
+          "description": "Optional catalog-declared author/owner.",
+          "type": "string"
+        },
+        "tags": {
+          "description": "Optional free-form tags.",
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}
