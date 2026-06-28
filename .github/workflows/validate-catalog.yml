@@ -1,0 +1,111 @@
+name: Validate catalog
+
+# Validates plugins.json (the trust root the Phlix server reads) on every push
+# and pull request:
+#   1. JSON-Schema conformance against plugins.schema.json (pinned validator).
+#   2. plugins.json is valid JSON AND entries are sorted by `name` with no
+#      duplicate `name` (the "unsorted/undeduped" code-quality gate).
+#   3. (non-blocking) per-entry pin-drift check: download each pinned tarball
+#      and assert its sha256 matches artifactSha256, surfacing drift without
+#      flaking PRs.
+#
+# Landmines honored:
+#   - The schema uses `format: uri`, so ajv needs ajv-formats (co-installed and
+#     passed via `-c ajv-formats`), otherwise the `uri` format keyword errors.
+#   - The schema is Draft 2020-12, so ajv needs `--spec=draft2020`.
+#   - NO setup-node `cache: npm` — this repo has no lockfile.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  schema:
+    name: JSON-Schema + sort/dedup
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          # No `cache: npm` — there is no lockfile in this repo (known landmine).
+
+      - name: Validate plugins.json against plugins.schema.json
+        run: |
+          # ajv-cli@5 (ajv v8) for Draft 2020-12; ajv-formats@2 supplies the
+          # `uri` format keyword the schema relies on. Both pinned.
+          npx --yes --package ajv-cli@5 --package ajv-formats@2 -- \
+            ajv validate \
+              --spec=draft2020 \
+              -s plugins.schema.json \
+              -d plugins.json \
+              -c ajv-formats
+
+      - name: Assert plugins.json is valid JSON, sorted by name, no duplicates
+        run: |
+          # `jq -e` already fails (exit 5) on a JSON parse error, so this step
+          # doubles as the "valid JSON" assertion. The filter then fails (via
+          # halt_error 1) if the names are out of order or contain a duplicate.
+          jq -e -r '
+            .plugins | map(.name) as $names
+            | ($names | sort)   as $sorted
+            | ($names | unique) as $uniq
+            | if ($names != $sorted) then
+                "ERROR: plugins are not sorted by name.\n  got:  \($names)\n  want: \($sorted)"
+                | halt_error(1)
+              elif ($uniq | length) != ($names | length) then
+                "ERROR: duplicate plugin name(s): "
+                + ([$names[] | select(. as $n | ([$names[] | select(. == $n)] | length) > 1)] | unique | tostring)
+                | halt_error(1)
+              else
+                "OK: \($names | length) entries — valid JSON, sorted by name, no duplicates."
+              end
+          ' plugins.json
+
+  pin-drift:
+    name: Pin-drift (non-blocking)
+    runs-on: ubuntu-latest
+    # Surfaces ref/artifactSha256 drift without ever failing a PR.
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify each entry's artifactSha256 matches its pinned tarball
+        run: |
+          set -u
+          drift=0
+          # owner/repo are derived from the entry `repo` URL; ref + expected
+          # digest come straight from the catalog.
+          while IFS=$'\t' read -r name repo ref expected; do
+            owner_repo="${repo#https://github.com/}"
+            owner_repo="${owner_repo%/}"
+            url="https://github.com/${owner_repo}/archive/${ref}.tar.gz"
+            echo "::group::${name}"
+            echo "url: ${url}"
+            actual="$(curl -fsSL "${url}" | sha256sum | cut -d' ' -f1)" || {
+              echo "WARN: could not download ${url}"
+              echo "::endgroup::"
+              drift=1
+              continue
+            }
+            if [ "${actual}" = "${expected}" ]; then
+              echo "OK: ${actual}"
+            else
+              echo "DRIFT: expected ${expected} but tarball hashes to ${actual}"
+              drift=1
+            fi
+            echo "::endgroup::"
+          done < <(jq -r '.plugins[] | [.name, .repo, .ref, .artifactSha256] | @tsv' plugins.json)
+
+          if [ "${drift}" -ne 0 ]; then
+            echo "Pin drift detected (non-blocking). Review the entries above."
+            exit 1
+          fi
+          echo "All pins match their tarballs."
