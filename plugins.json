@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "name": "Phlix Official Plugins",
   "description": "The default plugin catalog for Phlix. Add this as a plugin source in the admin Plugins section, then install plugins straight from the list.",
   "homepage": "https://github.com/detain/phlix-plugins",
@@ -11,6 +11,9 @@
       "summary": "Anime metadata from AniDB.",
       "description": "AniDB metadata provider — anime titles, descriptions, episodes and ratings via the AniDB UDP API and daily title dump.",
       "repo": "https://github.com/detain/phlix-plugin-anidb",
+      "ref": "852b472a6aa73b80192af96310fcc789dbcaf8d7",
+      "artifactSha256": "e8277e0ed419e4eb02245ad86896025bb6bb8ce90c348d2a7c7ea958724ce08c",
+      "version": "0.1.0",
       "author": "detain",
       "tags": ["anime", "metadata"]
     },
@@ -21,6 +24,9 @@
       "summary": "Anime & manga metadata from MyAnimeList.",
       "description": "MyAnimeList metadata provider — anime/manga search, details and rankings via the MAL API v2.",
       "repo": "https://github.com/detain/phlix-plugin-myanimelist",
+      "ref": "ea51e0e754f79d1bc22091f622d448cd89fb4923",
+      "artifactSha256": "c484dca258e68e9698a68b3d93639b6ff0db220cb047ff13ee62b3688f28cf41",
+      "version": "0.1.0",
       "author": "detain",
       "tags": ["anime", "manga", "metadata"]
     },
@@ -31,6 +37,9 @@
       "summary": "Scrobble playback to Trakt.tv.",
       "description": "Trakt scrobbler — scrobbles playback to Trakt.tv and syncs watch history over the Trakt OAuth API.",
       "repo": "https://github.com/detain/phlix-plugin-trakt",
+      "ref": "ecd8b909b59779d12b7b49136bdb248c2ecd2334",
+      "artifactSha256": "e5fdb4aa2de67ea019ef194dd098fd05d850cc9d8d1f14c5323c095714d7fb46",
+      "version": "1.0.0",
       "author": "detain",
       "tags": ["scrobbler", "trakt"]
     },
@@ -41,6 +50,9 @@
       "summary": "Scrobble music playback to Last.fm.",
       "description": "Last.fm scrobbler — scrobbles music playback to Last.fm, marking now-playing on start and submitting the scrobble at the end.",
       "repo": "https://github.com/detain/phlix-plugin-lastfm",
+      "ref": "43e1e7d2ce5108250a8c95a10e31ee86ba14e412",
+      "artifactSha256": "5ef58eb42ec7e77fd454204169886cbafe0a36c60111c525710a0471b0e444c4",
+      "version": "1.0.0",
       "author": "detain",
       "tags": ["scrobbler", "lastfm", "music"]
     }
