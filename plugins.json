@@ -14,6 +14,10 @@
       "ref": "852b472a6aa73b80192af96310fcc789dbcaf8d7",
       "artifactSha256": "e8277e0ed419e4eb02245ad86896025bb6bb8ce90c348d2a7c7ea958724ce08c",
       "version": "0.1.0",
+      "minServerVersion": "0.10.0",
+      "verified": true,
+      "deprecated": false,
+      "yanked": false,
       "author": "detain",
       "tags": [
         "anime",
@@ -30,6 +34,10 @@
       "ref": "43e1e7d2ce5108250a8c95a10e31ee86ba14e412",
       "artifactSha256": "5ef58eb42ec7e77fd454204169886cbafe0a36c60111c525710a0471b0e444c4",
       "version": "1.0.0",
+      "minServerVersion": "0.15.0",
+      "verified": true,
+      "deprecated": false,
+      "yanked": false,
       "author": "detain",
       "tags": [
         "scrobbler",
@@ -47,6 +55,10 @@
       "ref": "ea51e0e754f79d1bc22091f622d448cd89fb4923",
       "artifactSha256": "c484dca258e68e9698a68b3d93639b6ff0db220cb047ff13ee62b3688f28cf41",
       "version": "0.1.0",
+      "minServerVersion": "0.10.0",
+      "verified": true,
+      "deprecated": false,
+      "yanked": false,
       "author": "detain",
       "tags": [
         "anime",
@@ -64,6 +76,10 @@
       "ref": "ecd8b909b59779d12b7b49136bdb248c2ecd2334",
       "artifactSha256": "e5fdb4aa2de67ea019ef194dd098fd05d850cc9d8d1f14c5323c095714d7fb46",
       "version": "1.0.0",
+      "minServerVersion": "0.14.0",
+      "verified": true,
+      "deprecated": false,
+      "yanked": false,
       "author": "detain",
       "tags": [
         "scrobbler",
