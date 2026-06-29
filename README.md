@@ -9,12 +9,12 @@ single plugin repo URL directly.
 
 ## Plugins
 
-| Plugin | Type | Version | Repo |
-|---|---|---|---|
-| AniDB | metadata-provider | 0.1.0 | [phlix-plugin-anidb](https://github.com/detain/phlix-plugin-anidb) |
-| MyAnimeList | metadata-provider | 0.1.0 | [phlix-plugin-myanimelist](https://github.com/detain/phlix-plugin-myanimelist) |
-| Trakt | scrobbler | 1.0.0 | [phlix-plugin-trakt](https://github.com/detain/phlix-plugin-trakt) |
-| Last.fm | scrobbler | 1.0.0 | [phlix-plugin-lastfm](https://github.com/detain/phlix-plugin-lastfm) |
+| Plugin | Type | Version | Min Server | Repo |
+|---|---|---|---|---|
+| AniDB | metadata-provider | 0.1.0 | ≥ 0.10.0 | [phlix-plugin-anidb](https://github.com/detain/phlix-plugin-anidb) |
+| MyAnimeList | metadata-provider | 0.1.0 | ≥ 0.10.0 | [phlix-plugin-myanimelist](https://github.com/detain/phlix-plugin-myanimelist) |
+| Trakt | scrobbler | 1.0.0 | ≥ 0.14.0 | [phlix-plugin-trakt](https://github.com/detain/phlix-plugin-trakt) |
+| Last.fm | scrobbler | 1.0.0 | ≥ 0.15.0 | [phlix-plugin-lastfm](https://github.com/detain/phlix-plugin-lastfm) |
 
 ## Catalog format (`plugins.json`)
 
@@ -40,6 +40,10 @@ moving branch.
       "ref": "852b472a6aa73b80192af96310fcc789dbcaf8d7",
       "artifactSha256": "e8277e0ed419e4eb02245ad86896025bb6bb8ce90c348d2a7c7ea958724ce08c",
       "version": "0.1.0",
+      "minServerVersion": "0.10.0",
+      "verified": true,
+      "deprecated": false,
+      "yanked": false,
       "tags": ["anime", "metadata"]
     }
   ]
@@ -56,6 +60,12 @@ moving branch.
 | `ref` | yes | 40-char lowercase commit sha the entry is **pinned** to (not a branch/tag). |
 | `artifactSha256` | yes | Bare 64-hex sha256 of `…/archive/<ref>.tar.gz` (no `sha256:` prefix). |
 | `version` | yes | The plugin's semver at the pinned `ref` (from its `plugin.json`). |
+| `minServerVersion` | no | Minimum Phlix server version required (from the plugin's `phlix_min_server_version` at the pinned `ref`). The admin UI shows "incompatible" pre-download when the running server is older. |
+| `maxServerVersion` | no | Maximum Phlix server version supported (exclusive upper bound). |
+| `verified` | no | Whether this entry has been reviewed by the catalog maintainer (`true` for all official entries). Un-verified entries are install-blocked by the server in default-deny mode. |
+| `deprecated` | no | Whether this plugin is deprecated. Deprecated entries may still be installable but the server warns operators. |
+| `yanked` | no | Whether this version has been withdrawn. Yanked entries are hidden from the catalog listing. |
+| `deprecationMessage` | no | Human-readable message shown for deprecated/yanked entries. |
 | `summary` / `description` | no | Short / long description. |
 | `author` | no | Catalog-declared author/owner. |
 | `tags` | no | Free-form tags. |
