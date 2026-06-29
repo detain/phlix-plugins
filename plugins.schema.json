@@ -89,6 +89,32 @@
           "type": "string",
           "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-(?:(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+[0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*)?$"
         },
+        "minServerVersion": {
+          "description": "Minimum Phlix server version required to run this plugin (from its plugin.json phlix_min_server_version at the pinned ref). The admin UI shows 'incompatible' before download when the running server is older.",
+          "type": "string",
+          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-(?:(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+[0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*)?$"
+        },
+        "maxServerVersion": {
+          "description": "Maximum Phlix server version supported by this plugin (exclusive upper bound). Optional.",
+          "type": "string",
+          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-(?:(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+[0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*)?$"
+        },
+        "verified": {
+          "description": "Whether this entry has been reviewed and verified by the catalog maintainer. An un-verified entry (false) is install-blocked by the server in default-deny mode.",
+          "type": "boolean"
+        },
+        "deprecated": {
+          "description": "Whether this plugin entry is deprecated. Deprecated entries may still be installable but the server will warn operators.",
+          "type": "boolean"
+        },
+        "yanked": {
+          "description": "Whether this plugin version has been yanked (withdrawn). A yanked entry is hidden from the catalog listing but still known to the server for operators who have it installed.",
+          "type": "boolean"
+        },
+        "deprecationMessage": {
+          "description": "Human-readable message shown when a deprecated or yanked entry is encountered. Explains why and what to use instead.",
+          "type": "string"
+        },
         "author": {
           "description": "Optional catalog-declared author/owner.",
           "type": "string"
