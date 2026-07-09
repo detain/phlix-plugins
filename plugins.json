@@ -85,6 +85,27 @@
         "scrobbler",
         "trakt"
       ]
+    },
+    {
+      "name": "phlix-plugin-example",
+      "title": "Example",
+      "type": "metadata-provider",
+      "summary": "Example plugin demonstrating the Phlix plugin contract.",
+      "description": "Example plugin — reference implementation of the Phlix plugin lifecycle contract (onEnable/onDisable/subscribedEvents). Use as a template for building new plugins.",
+      "repo": "https://github.com/detain/phlix-plugin-example",
+      "ref": "04f7f4bcce5736c2d2a02553990b25a654924cdf",
+      "artifactSha256": "21fea361fa6d28deece68563ab5102264a322646791e7eb463a0e774c3cca56b",
+      "version": "0.1.0",
+      "minServerVersion": "0.10.0",
+      "verified": true,
+      "deprecated": false,
+      "yanked": false,
+      "author": "detain",
+      "tags": [
+        "example",
+        "template",
+        "metadata"
+      ]
     }
   ]
 }
