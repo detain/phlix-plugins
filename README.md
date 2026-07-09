@@ -11,11 +11,15 @@ single plugin repo URL directly.
 
 | Plugin | Type | Version | Min Server | Repo |
 |---|---|---|---|---|
-| AniDB | metadata-provider | 0.1.0 | ≥ 0.10.0 | [phlix-plugin-anidb](https://github.com/detain/phlix-plugin-anidb) |
-| MyAnimeList | metadata-provider | 0.1.0 | ≥ 0.10.0 | [phlix-plugin-myanimelist](https://github.com/detain/phlix-plugin-myanimelist) |
-| Trakt | scrobbler | 1.0.0 | ≥ 0.14.0 | [phlix-plugin-trakt](https://github.com/detain/phlix-plugin-trakt) |
-| Last.fm | scrobbler | 1.0.0 | ≥ 0.15.0 | [phlix-plugin-lastfm](https://github.com/detain/phlix-plugin-lastfm) |
+| AniDB | metadata-provider | 0.2.0 | ≥ 0.10.0 | [phlix-plugin-anidb](https://github.com/detain/phlix-plugin-anidb) |
+| AniList | metadata-provider | 0.1.0 | ≥ 0.14.0 | [phlix-plugin-anilist](https://github.com/detain/phlix-plugin-anilist) |
 | Example | metadata-provider | 0.1.0 | ≥ 0.10.0 | [phlix-plugin-example](https://github.com/detain/phlix-plugin-example) |
+| Last.fm | scrobbler | 1.0.0 | ≥ 0.15.0 | [phlix-plugin-lastfm](https://github.com/detain/phlix-plugin-lastfm) |
+| MyAnimeList | metadata-provider | 0.1.0 | ≥ 0.10.0 | [phlix-plugin-myanimelist](https://github.com/detain/phlix-plugin-myanimelist) |
+| MusicBrainz | metadata-provider | 0.1.0 | ≥ 0.14.0 | [phlix-plugin-musicbrainz](https://github.com/detain/phlix-plugin-musicbrainz) |
+| OMDb | metadata-provider | 0.1.0 | ≥ 0.15.0 | [phlix-plugin-omdb](https://github.com/detain/phlix-plugin-omdb) |
+| OpenSubtitles | subtitle-provider | 0.1.0 | ≥ 0.10.0 | [phlix-plugin-opensubtitles](https://github.com/detain/phlix-plugin-opensubtitles) |
+| Trakt | scrobbler | 1.1.0 | ≥ 0.14.0 | [phlix-plugin-trakt](https://github.com/detain/phlix-plugin-trakt) |
 
 ## Catalog format (`plugins.json`)
 
