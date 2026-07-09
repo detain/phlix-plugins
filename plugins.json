@@ -133,6 +133,29 @@
         "template",
         "metadata"
       ]
+    },
+    {
+      "name": "phlix-plugin-opensubtitles",
+      "title": "OpenSubtitles",
+      "type": "subtitle-provider",
+      "summary": "Download subtitles from OpenSubtitles.",
+      "description": "OpenSubtitles subtitle provider — search and download subtitles for movies and TV shows via the OpenSubtitles REST API, supporting search by IMDB ID, filename, and file hash.",
+      "repo": "https://github.com/detain/phlix-plugin-opensubtitles",
+      "ref": "7559a023c5bdde2fc5aec6416dd08c033d504d15",
+      "artifactSha256": "3612dcacdab5c5942d10c8eccc327e9bdcded8a95309949d76a773f25753b254",
+      "version": "0.1.0",
+      "minServerVersion": "0.10.0",
+      "verified": true,
+      "deprecated": false,
+      "yanked": false,
+      "author": "detain",
+      "tags": [
+        "opensubtitles",
+        "subtitles",
+        "srt",
+        "captions",
+        "subtitle-provider"
+      ]
     }
   ]
 }
