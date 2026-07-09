@@ -156,6 +156,30 @@
         "captions",
         "subtitle-provider"
       ]
+    },
+    {
+      "name": "phlix-plugin-omdb",
+      "title": "OMDb",
+      "type": "metadata",
+      "summary": "IMDb/RT/Metascore ratings via OMDb API.",
+      "description": "OMDb metadata provider — IMDb ID resolution, Rotten Tomatoes, Metascore, and IMDb ratings for movies and TV via the OMDb API.",
+      "repo": "https://github.com/detain/phlix-plugin-omdb",
+      "ref": "6fd6e9406427a0c32fcd0f3bbafb44f947f19f63",
+      "artifactSha256": "4b81977b302f78c576f9822dbbd3008503097b695bf55b5913708651c294f659",
+      "version": "0.1.0",
+      "minServerVersion": "0.15.0",
+      "verified": true,
+      "deprecated": false,
+      "yanked": false,
+      "author": "detain",
+      "tags": [
+        "omdb",
+        "ratings",
+        "imdb",
+        "rotten-tomatoes",
+        "metascore",
+        "metadata"
+      ]
     }
   ]
 }
