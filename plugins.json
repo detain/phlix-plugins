@@ -67,6 +67,33 @@
       ]
     },
     {
+      "name": "phlix-plugin-musicbrainz",
+      "title": "MusicBrainz",
+      "type": "metadata-provider",
+      "summary": "Music metadata from MusicBrainz.",
+      "description": "MusicBrainz metadata provider — artist/album/track metadata, album art via Cover Art Archive, and AcoustID integration.",
+      "repo": "https://github.com/detain/phlix-plugin-musicbrainz",
+      "ref": "dc5e736a507dafca243a63bf1df3b1f25aff1fa1",
+      "artifactSha256": "94b37e21b20798cb31eaaae299084f9724a82675d0fa6673cb068f4a514085ba",
+      "version": "0.1.0",
+      "minServerVersion": "0.14.0",
+      "verified": true,
+      "deprecated": false,
+      "yanked": false,
+      "author": "detain",
+      "tags": [
+        "musicbrainz",
+        "music",
+        "metadata",
+        "audio",
+        "albums",
+        "artists",
+        "tracks",
+        "acoustid",
+        "discography"
+      ]
+    },
+    {
       "name": "phlix-plugin-trakt",
       "title": "Trakt",
       "type": "scrobbler",
