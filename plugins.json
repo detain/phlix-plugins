@@ -25,6 +25,29 @@
       ]
     },
     {
+      "name": "phlix-plugin-anilist",
+      "title": "AniList",
+      "type": "metadata-provider",
+      "summary": "Anime metadata from AniList.",
+      "description": "AniList metadata provider — anime search, details, episodes, characters, and watchlist sync via the AniList GraphQL API.",
+      "repo": "https://github.com/detain/phlix-plugin-anilist",
+      "ref": "766a834fbde38e788713341905225b5a90cab2b0",
+      "artifactSha256": "21302cd43839c7a5f00c5ba995914d21816845d655495f17534f4d35aa1721da",
+      "version": "0.1.0",
+      "minServerVersion": "0.14.0",
+      "verified": true,
+      "deprecated": false,
+      "yanked": false,
+      "author": "detain",
+      "tags": [
+        "anime",
+        "metadata",
+        "graphql",
+        "watchlist",
+        "otaku"
+      ]
+    },
+    {
       "name": "phlix-plugin-lastfm",
       "title": "Last.fm",
       "type": "scrobbler",
@@ -46,6 +69,33 @@
       ]
     },
     {
+      "name": "phlix-plugin-musicbrainz",
+      "title": "MusicBrainz",
+      "type": "metadata",
+      "summary": "Music library enrichment via MusicBrainz.",
+      "description": "MusicBrainz metadata enrichment — fetches artist/album/track metadata, cover art from Cover Art Archive, and optional AcoustID fingerprints for audio items.",
+      "repo": "https://github.com/detain/phlix-plugin-musicbrainz",
+      "ref": "dc5e736a507dafca243a63bf1df3b1f25aff1fa1",
+      "artifactSha256": "94b37e21b20798cb31eaaae299084f9724a82675d0fa6673cb068f4a514085ba",
+      "version": "0.1.0",
+      "minServerVersion": "0.14.0",
+      "verified": true,
+      "deprecated": false,
+      "yanked": false,
+      "author": "detain",
+      "tags": [
+        "music",
+        "musicbrainz",
+        "metadata",
+        "audio",
+        "albums",
+        "artists",
+        "tracks",
+        "acoustid",
+        "discography"
+      ]
+    },
+    {
       "name": "phlix-plugin-myanimelist",
       "title": "MyAnimeList",
       "type": "metadata-provider",
@@ -64,6 +114,58 @@
         "anime",
         "manga",
         "metadata"
+      ]
+    },
+    {
+      "name": "phlix-plugin-omdb",
+      "title": "OMDb",
+      "type": "metadata",
+      "summary": "Multi-source ratings from OMDb (IMDb, Rotten Tomatoes, Metascore).",
+      "description": "OMDb metadata provider — fetches IMDb rating, Rotten Tomatoes audience/critics score, and Metascore for movies and TV shows via the OMDb API.",
+      "repo": "https://github.com/detain/phlix-plugin-omdb",
+      "ref": "eed5f87d6fa7f0dcb2c9d6adfdb5640748185ba9",
+      "artifactSha256": "347c1215853faa703b10604e4dcf463cd152a4b784ad196fba6407d52ca12de7",
+      "version": "0.1.0",
+      "minServerVersion": "0.15.0",
+      "verified": true,
+      "deprecated": false,
+      "yanked": false,
+      "author": "detain",
+      "tags": [
+        "omdb",
+        "ratings",
+        "imdb",
+        "rotten-tomatoes",
+        "metascore",
+        "metadata-provider",
+        "movies",
+        "tv"
+      ]
+    },
+    {
+      "name": "phlix-plugin-opensubtitles",
+      "title": "OpenSubtitles",
+      "type": "subtitle-provider",
+      "summary": "Subtitle download via OpenSubtitles.",
+      "description": "OpenSubtitles subtitle provider — searches and downloads subtitles in SRT, SUB, ASS and other formats via the OpenSubtitles REST API, with language and format preferences.",
+      "repo": "https://github.com/detain/phlix-plugin-opensubtitles",
+      "ref": "7559a023c5bdde2fc5aec6416dd08c033d504d15",
+      "artifactSha256": "3612dcacdab5c5942d10c8eccc327e9bdcded8a95309949d76a773f25753b254",
+      "version": "0.1.0",
+      "minServerVersion": "0.10.0",
+      "verified": true,
+      "deprecated": false,
+      "yanked": false,
+      "author": "detain",
+      "tags": [
+        "opensubtitles",
+        "subtitles",
+        "captions",
+        "srt",
+        "subtitle-provider",
+        "download",
+        "foreign-audio",
+        "accessibility"
       ]
     },
     {
