@@ -8,6 +8,15 @@ name: Validate catalog
 #   3. (non-blocking) per-entry pin-drift check: download each pinned tarball
 #      and assert its sha256 matches artifactSha256, surfacing drift without
 #      flaking PRs.
+#   4. (BLOCKING) per-entry plugin-manifest check: download each pinned tarball,
+#      extract its `plugin.json`, and validate it against the phlix-shared
+#      manifest schema — the SAME contract the Phlix server enforces at install
+#      time. This is the guardrail that stops a catalog release from pinning a
+#      plugin the server would reject on install: an invalid `type` (must be a
+#      value from the manifest schema's enum — e.g. `metadata-provider`, NOT
+#      `metadata`), a `settings.<name>` field carrying a key the strict settings
+#      schema forbids (e.g. an inert `managed` flag), a malformed `events[]`
+#      entry, etc. If any pinned manifest is invalid, CI fails.
 #
 # Landmines honored:
 #   - The schema uses `format: uri`, so ajv needs ajv-formats (co-installed and
@@ -109,3 +118,64 @@ jobs:
             exit 1
           fi
           echo "All pins match their tarballs."
+
+  manifest:
+    name: Plugin manifest schema (blocking)
+    runs-on: ubuntu-latest
+    # BLOCKING: every pinned plugin's plugin.json must satisfy the phlix-shared
+    # manifest schema — the same contract the server validates at install time
+    # (PluginLoader::finalizeInstall). Prevents pinning a plugin that would fail
+    # to install (bad `type`, forbidden `settings.*` key like `managed`, etc.).
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          # No `cache: npm` — there is no lockfile in this repo (known landmine).
+
+      - name: Fetch the phlix-shared manifest schema
+        run: |
+          # Canonical manifest contract, kept in phlix-shared. Draft 2020-12.
+          curl -fsSL --retry 3 \
+            https://raw.githubusercontent.com/detain/phlix-shared/master/schemas/manifest.schema.json \
+            -o manifest.schema.json
+          echo "manifest schema: $(jq -r '."$schema"' manifest.schema.json)"
+
+      - name: Validate every pinned plugin's plugin.json against the manifest schema
+        run: |
+          set -u
+          fail=0
+          while IFS=$'\t' read -r name repo ref; do
+            owner_repo="${repo#https://github.com/}"; owner_repo="${owner_repo%/}"
+            url="https://github.com/${owner_repo}/archive/${ref}.tar.gz"
+            echo "::group::${name} (${ref})"
+            work="$(mktemp -d)"
+            if ! curl -fsSL "${url}" | tar -xz -C "${work}" --strip-components=1; then
+              echo "ERROR: could not download/extract ${url}"
+              fail=1; rm -rf "${work}"; echo "::endgroup::"; continue
+            fi
+            if [ ! -f "${work}/plugin.json" ]; then
+              echo "ERROR: ${name} has no plugin.json at the repo root"
+              fail=1; rm -rf "${work}"; echo "::endgroup::"; continue
+            fi
+            # ajv-cli@5 (ajv v8, Draft 2020-12) + ajv-formats@2, both pinned.
+            if npx --yes --package ajv-cli@5 --package ajv-formats@2 -- \
+                 ajv validate --spec=draft2020 --all-errors \
+                   -s manifest.schema.json -d "${work}/plugin.json" -c ajv-formats; then
+              echo "OK: ${name} manifest is valid"
+            else
+              echo "INVALID: ${name} manifest fails the manifest schema (see ajv errors above)"
+              fail=1
+            fi
+            rm -rf "${work}"
+            echo "::endgroup::"
+          done < <(jq -r '.plugins[] | [.name, .repo, .ref] | @tsv' plugins.json)
+
+          if [ "${fail}" -ne 0 ]; then
+            echo "One or more pinned plugin manifests are invalid — the server would reject them at install. Refusing to pin."
+            exit 1
+          fi
+          echo "All pinned plugin manifests satisfy the manifest schema."
