@@ -131,4 +131,4 @@ jobs:
           UPDATED="${{ needs.update.outputs.updated_plugins }}"
           gh pr create --title "Update checksums" --body "Updated checksums for: $UPDATED" --base master
         env:
-          GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
