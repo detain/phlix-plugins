@@ -92,11 +92,11 @@ jobs:
 
       - name: Install test dependencies
         run: |
-          pip install -q pytest jsonschema
+          pip install -q pytest pytest-cov jsonschema
 
       - name: Run pytest tests
         run: |
-          python -m pytest tests/ -v --tb=short
+          python -m pytest tests/ -v --tb=short --cov=. --cov-report=term-missing
 
   pin-drift:
     name: Pin-drift (non-blocking)

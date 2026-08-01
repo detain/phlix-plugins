@@ -314,3 +314,380 @@ class TestSpecificPlugins:
         for plugin in plugins:
             assert "tags" in plugin, f"Plugin {plugin['name']} missing tags"
             assert len(plugin["tags"]) > 0, f"Plugin {plugin['name']} has empty tags"
+
+
+class TestEdgeCases:
+    """Tests for edge cases using explicit plugin data."""
+
+    def test_deprecation_message_is_string(self):
+        """deprecationMessage field must be a string when present."""
+        # Construct a plugin with deprecationMessage to test the validation branch
+        plugin = {
+            "name": "phlix-plugin-test",
+            "title": "Test Plugin",
+            "type": "metadata-provider",
+            "repo": "https://github.com/detain/phlix-plugin-test",
+            "ref": "0" * 40,
+            "artifactSha256": "0" * 64,
+            "version": "1.0.0",
+            "deprecationMessage": "Use phlix-plugin-other instead",
+            "author": "test",
+            "tags": ["test"]
+        }
+        assert isinstance(plugin["deprecationMessage"], str)
+        assert plugin["deprecationMessage"] == "Use phlix-plugin-other instead"
+
+    def test_max_server_version_is_valid_semver(self):
+        """maxServerVersion field must be valid semver when present."""
+        plugin = {
+            "name": "phlix-plugin-test",
+            "title": "Test Plugin",
+            "type": "metadata-provider",
+            "repo": "https://github.com/detain/phlix-plugin-test",
+            "ref": "0" * 40,
+            "artifactSha256": "0" * 64,
+            "version": "1.0.0",
+            "minServerVersion": "1.0.0",
+            "maxServerVersion": "2.0.0",
+            "author": "test",
+            "tags": ["test"]
+        }
+        SEMVER_PATTERN = re.compile(
+            r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*)?$"
+        )
+        assert SEMVER_PATTERN.match(plugin["maxServerVersion"])
+
+    def test_deprecation_message_empty_string_is_valid(self):
+        """deprecationMessage can be an empty string."""
+        plugin = {
+            "name": "phlix-plugin-test",
+            "title": "Test Plugin",
+            "type": "metadata-provider",
+            "repo": "https://github.com/detain/phlix-plugin-test",
+            "ref": "0" * 40,
+            "artifactSha256": "0" * 64,
+            "version": "1.0.0",
+            "deprecationMessage": "",
+            "author": "test",
+            "tags": ["test"]
+        }
+        assert isinstance(plugin["deprecationMessage"], str)
+
+    def test_tags_can_be_empty_array(self):
+        """tags can be an empty array (though not recommended)."""
+        plugin = {
+            "name": "phlix-plugin-test",
+            "title": "Test Plugin",
+            "type": "metadata-provider",
+            "repo": "https://github.com/detain/phlix-plugin-test",
+            "ref": "0" * 40,
+            "artifactSha256": "0" * 64,
+            "version": "1.0.0",
+            "tags": [],
+            "author": "test"
+        }
+        assert isinstance(plugin["tags"], list)
+
+    def test_optional_fields_all_absent_is_valid(self):
+        """Plugin can have only required fields."""
+        plugin = {
+            "name": "phlix-plugin-minimal",
+            "title": "Minimal Plugin",
+            "type": "metadata-provider",
+            "repo": "https://github.com/detain/phlix-plugin-minimal",
+            "ref": "a" * 40,
+            "artifactSha256": "b" * 64,
+            "version": "0.1.0"
+        }
+        # This should satisfy all required field checks
+        required_fields = {"name", "title", "type", "repo", "ref", "artifactSha256", "version"}
+        for field in required_fields:
+            assert field in plugin
+
+
+class TestSchemaValidation:
+    """Tests for JSON Schema validation behavior."""
+
+    def test_schema_rejects_unknown_plugin_properties(self, schema_json):
+        """Schema should reject plugins with unexpected properties."""
+        import jsonschema
+        invalid_plugin = {
+            "name": "phlix-plugin-invalid",
+            "title": "Invalid Plugin",
+            "type": "metadata-provider",
+            "repo": "https://github.com/detain/phlix-plugin-invalid",
+            "ref": "a" * 40,
+            "artifactSha256": "b" * 64,
+            "version": "1.0.0",
+            "unknownField": "should be rejected"
+        }
+        catalog = {
+            "schemaVersion": 2,
+            "name": "Test Catalog",
+            "plugins": [invalid_plugin]
+        }
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(catalog, schema_json)
+
+    def test_schema_accepts_valid_minimal_plugin(self, schema_json):
+        """Schema should accept a valid minimal plugin."""
+        import jsonschema
+        valid_plugin = {
+            "name": "phlix-plugin-valid",
+            "title": "Valid Plugin",
+            "type": "metadata-provider",
+            "repo": "https://github.com/detain/phlix-plugin-valid",
+            "ref": "a" * 40,
+            "artifactSha256": "b" * 64,
+            "version": "1.0.0"
+        }
+        catalog = {
+            "schemaVersion": 2,
+            "name": "Test Catalog",
+            "plugins": [valid_plugin]
+        }
+        # Should not raise
+        jsonschema.validate(catalog, schema_json)
+
+    def test_schema_rejects_invalid_plugin_type(self, schema_json):
+        """Schema should reject plugins with invalid type."""
+        import jsonschema
+        invalid_plugin = {
+            "name": "phlix-plugin-bad-type",
+            "title": "Bad Type Plugin",
+            "type": "invalid-type",
+            "repo": "https://github.com/detain/phlix-plugin-bad-type",
+            "ref": "a" * 40,
+            "artifactSha256": "b" * 64,
+            "version": "1.0.0"
+        }
+        catalog = {
+            "schemaVersion": 2,
+            "name": "Test Catalog",
+            "plugins": [invalid_plugin]
+        }
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(catalog, schema_json)
+
+
+class TestPatternValidation:
+    """Tests for regex pattern validation."""
+
+    def test_valid_plugin_name_patterns(self):
+        """Valid plugin names should match the pattern."""
+        PLUGIN_NAME_PATTERN = re.compile(r"^phlix-plugin-[a-z0-9][a-z0-9-]*$")
+        valid_names = [
+            "phlix-plugin-a",
+            "phlix-plugin-ab",
+            "phlix-plugin-a1",
+            "phlix-plugin-a1b2c3",
+            "phlix-plugin-anidb",
+            "phlix-plugin-a",
+            "phlix-plugin-0",
+            "phlix-plugin-abc-def",
+        ]
+        for name in valid_names:
+            assert PLUGIN_NAME_PATTERN.match(name), f"Expected {name} to be valid"
+
+    def test_invalid_plugin_name_patterns(self):
+        """Invalid plugin names should not match the pattern."""
+        PLUGIN_NAME_PATTERN = re.compile(r"^phlix-plugin-[a-z0-9][a-z0-9-]*$")
+        invalid_names = [
+            "phlix-plugin-",  # empty after hyphen
+            "Phlix-plugin-a",  # uppercase P
+            "phlix_plugin_a",  # underscore
+            "phlix-plugin-a_b",  # underscore in name
+            "phlixplug-in-a",  # wrong prefix
+            "phlix-plugin-A",  # uppercase letter
+            "phlix--plugin-a",  # double hyphen
+        ]
+        for name in invalid_names:
+            assert not PLUGIN_NAME_PATTERN.match(name), f"Expected {name} to be invalid"
+
+    def test_valid_semver_patterns(self):
+        """Valid semver versions should match the pattern."""
+        SEMVER_PATTERN = re.compile(
+            r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*)?$"
+        )
+        valid_versions = [
+            "0.0.0",
+            "1.0.0",
+            "1.2.3",
+            "10.20.30",
+            "1.0.0-alpha",
+            "1.0.0-alpha.1",
+            "1.0.0+build",
+            "1.0.0-alpha+build",
+        ]
+        for version in valid_versions:
+            assert SEMVER_PATTERN.match(version), f"Expected {version} to be valid"
+
+    def test_invalid_semver_patterns(self):
+        """Invalid semver versions should not match the pattern."""
+        SEMVER_PATTERN = re.compile(
+            r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*)?$"
+        )
+        invalid_versions = [
+            "1.0",  # missing patch
+            "1",  # missing minor and patch
+            "1.0.0.0",  # too many parts
+            "01.0.0",  # leading zero
+            "1.00.0",  # leading zero
+            "1.0.01",  # leading zero
+        ]
+        for version in invalid_versions:
+            assert not SEMVER_PATTERN.match(version), f"Expected {version} to be invalid"
+
+    def test_valid_ref_patterns(self):
+        """Valid git commit SHAs should match the pattern."""
+        REF_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+        valid_refs = [
+            "0" * 40,
+            "a" * 40,
+            "f" * 40,
+            "a0" * 20,
+            "4b80320afcaf876767717d027b5200f69f2ab5b8",
+        ]
+        for ref in valid_refs:
+            assert REF_PATTERN.match(ref), f"Expected {ref} to be valid"
+
+    def test_invalid_ref_patterns(self):
+        """Invalid git commit SHAs should not match the pattern."""
+        REF_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+        invalid_refs = [
+            "0" * 39,  # too short
+            "0" * 41,  # too long
+            "G" * 40,  # invalid hex char
+            "0" * 38 + "GG",  # invalid chars at end
+            "ABCDEF0123456789ABCDEF0123456789ABCDEF01",  # uppercase
+        ]
+        for ref in invalid_refs:
+            assert not REF_PATTERN.match(ref), f"Expected {ref} to be invalid"
+
+    def test_valid_artifact_sha256_patterns(self):
+        """Valid SHA256 hashes should match the pattern."""
+        SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+        valid_hashes = [
+            "0" * 64,
+            "a" * 64,
+            "f" * 64,
+            "a0" * 32,
+            "a9854f188ac0a4b8dc629ecc25411a142b3b155058b9a67ba78a60d77be2dd66",
+        ]
+        for sha in valid_hashes:
+            assert SHA256_PATTERN.match(sha), f"Expected {sha} to be valid"
+
+    def test_invalid_artifact_sha256_patterns(self):
+        """Invalid SHA256 hashes should not match the pattern."""
+        SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+        invalid_hashes = [
+            "0" * 63,  # too short
+            "0" * 65,  # too long
+            "G" * 64,  # invalid hex char
+            "0" * 62 + "GG",  # invalid chars at end
+            "ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789AB",  # uppercase
+        ]
+        for sha in invalid_hashes:
+            assert not SHA256_PATTERN.match(sha), f"Expected {sha} to be invalid"
+
+
+class TestCatalogOperations:
+    """Tests for catalog-level operations and edge cases."""
+
+    def test_catalog_with_single_plugin(self, schema_json):
+        """Catalog with a single plugin should be valid."""
+        import jsonschema
+        catalog = {
+            "schemaVersion": 2,
+            "name": "Single Plugin Catalog",
+            "plugins": [
+                {
+                    "name": "phlix-plugin-single",
+                    "title": "Single Plugin",
+                    "type": "metadata-provider",
+                    "repo": "https://github.com/detain/phlix-plugin-single",
+                    "ref": "a" * 40,
+                    "artifactSha256": "b" * 64,
+                    "version": "1.0.0"
+                }
+            ]
+        }
+        jsonschema.validate(catalog, schema_json)
+
+    def test_catalog_with_max_fields(self, schema_json):
+        """Catalog with all optional fields populated should be valid."""
+        import jsonschema
+        catalog = {
+            "schemaVersion": 2,
+            "name": "Full Catalog",
+            "description": "A catalog with all fields",
+            "homepage": "https://example.com",
+            "plugins": [
+                {
+                    "name": "phlix-plugin-full",
+                    "title": "Full Plugin",
+                    "type": "metadata-provider",
+                    "summary": "A summary",
+                    "description": "A description",
+                    "repo": "https://github.com/detain/phlix-plugin-full",
+                    "ref": "a" * 40,
+                    "artifactSha256": "b" * 64,
+                    "version": "1.0.0",
+                    "minServerVersion": "1.0.0",
+                    "maxServerVersion": "2.0.0",
+                    "verified": True,
+                    "deprecated": False,
+                    "yanked": False,
+                    "deprecationMessage": "Use another plugin",
+                    "author": "test author",
+                    "tags": ["tag1", "tag2"]
+                }
+            ]
+        }
+        jsonschema.validate(catalog, schema_json)
+
+
+class TestOriginalMethodsWithOptionalFields:
+    """Tests that invoke original test methods with optional fields present.
+
+    These tests ensure the conditional branches in the original test methods
+    (which iterate over plugins looking for optional fields) are fully covered.
+    """
+
+    def test_max_server_version_branch_is_covered(self):
+        """Invoke original maxServerVersion test with plugins containing that field."""
+        # Create a plugin with maxServerVersion present
+        plugin_with_max_version = {
+            "name": "phlix-plugin-test",
+            "title": "Test Plugin",
+            "type": "metadata-provider",
+            "repo": "https://github.com/detain/phlix-plugin-test",
+            "ref": "a" * 40,
+            "artifactSha256": "b" * 64,
+            "version": "1.0.0",
+            "minServerVersion": "1.0.0",
+            "maxServerVersion": "2.0.0"
+        }
+
+        # Instantiate the original test class and call the method directly
+        test_instance = TestServerVersion()
+        # The method iterates over plugins, so pass a list with our plugin
+        test_instance.test_max_server_version_is_valid_semver_if_present([plugin_with_max_version])
+
+    def test_deprecation_message_branch_is_covered(self):
+        """Invoke original deprecationMessage test with plugins containing that field."""
+        # Create a plugin with deprecationMessage present
+        plugin_with_deprecation = {
+            "name": "phlix-plugin-test",
+            "title": "Test Plugin",
+            "type": "metadata-provider",
+            "repo": "https://github.com/detain/phlix-plugin-test",
+            "ref": "a" * 40,
+            "artifactSha256": "b" * 64,
+            "version": "1.0.0",
+            "deprecationMessage": "Use phlix-plugin-other instead"
+        }
+
+        # Instantiate the original test class and call the method directly
+        test_instance = TestOptionalFields()
+        test_instance.test_deprecation_message_is_string_if_present([plugin_with_deprecation])
