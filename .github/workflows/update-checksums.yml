@@ -55,10 +55,6 @@ jobs:
     needs: compute-checksums
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -118,17 +114,20 @@ jobs:
                   print("No updates needed - all checksums match.")
           PYEOF
 
-      - name: Create PR
+      - name: Clone repo for push
         if: needs.update.outputs.changed == 'true'
         run: |
-          BRANCH="checksum-update-$(date +%Y%m%d%H%M%S)"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -b "$BRANCH"
-          git add plugins.json
-          git commit -m "Update checksums"
-          git push origin "$BRANCH" -o ci.skip
+          git clone --depth 1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/detain/phlix-plugins.git /tmp/phlix-plugins
+
+      - name: Push changes
+        if: needs.update.outputs.changed == 'true'
+        run: |
+          cd /tmp/phlix-plugins
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          cp plugins.json /tmp/phlix-plugins/
           UPDATED="${{ needs.update.outputs.updated_plugins }}"
-          gh pr create --title "Update checksums" --body "Updated checksums for: $UPDATED" --base master
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          git add plugins.json
+          git diff --cached --stat
+          git commit -m "Update checksums: $UPDATED"
+          git push
