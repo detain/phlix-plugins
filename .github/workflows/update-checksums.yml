@@ -1,0 +1,134 @@
+name: Update Checksums
+
+on:
+  repository_dispatch:
+    types: [plugin-push]
+  push:
+    branches: [main, master]
+  schedule:
+    - cron: '*/30 * * * *'
+
+jobs:
+  compute-checksums:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - plugin: phlix-plugin-anidb
+            ref: 4b80320afcaf876767717d027b5200f69f2ab5b8
+          - plugin: phlix-plugin-anilist
+            ref: 1ddf29afc6d189bcc8db5f5a93f161ce89762f0a
+          - plugin: phlix-plugin-lastfm
+            ref: d7c388374e35201343fea6372f76e23323a1c675
+          - plugin: phlix-plugin-musicbrainz
+            ref: 1367653fc24ba93af1742a9dcc9c53e5e764bb55
+          - plugin: phlix-plugin-myanimelist
+            ref: 3755cf8340c0610366ff79ebdb16b7e53b64f1f6
+          - plugin: phlix-plugin-omdb
+            ref: b89169083cbc0ca8638f2d37d0af5fe90545dea7
+          - plugin: phlix-plugin-opensubtitles
+            ref: cd9df31d423f1a2b2d219c1c8b78fb1d0a6be368
+          - plugin: phlix-plugin-trakt
+            ref: 7dee5449678617c2d72f49a7b6101560906a78db
+    steps:
+      - name: Download tarball
+        run: |
+          url="https://github.com/detain/${{ matrix.plugin }}/archive/${{ matrix.ref }}.tar.gz"
+          echo "Downloading: $url"
+          curl -sL "$url" -o artifact.tar.gz
+
+      - name: Compute checksum
+        run: |
+          computed_sha=$(sha256sum artifact.tar.gz | cut -d' ' -f1)
+          echo "sha256=$computed_sha" >> "$GITHUB_OUTPUT"
+          echo "Plugin: ${{ matrix.plugin }}, computed: $computed_sha"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-${{ matrix.plugin }}
+          path: artifact.tar.gz
+          retention-days: 1
+
+  update:
+    needs: compute-checksums
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: plugin-*
+          merge-multiple: false
+
+      - name: Fetch current plugins.json
+        run: |
+          gh api repos/detain/phlix-plugins/contents/plugins.json --jq '.content' | base64 -d > plugins.json
+
+      - name: Verify and update checksums
+        id: verify
+        run: |
+          python3 << 'PYEOF'
+          import json
+          import subprocess
+          import os
+
+          with open('plugins.json') as f:
+              data = json.load(f)
+
+          updated_plugins = []
+          plugins = data['plugins']
+
+          for plugin in plugins:
+              name = plugin['name']
+              artifact_path = f'artifacts/plugin-{name}/artifact.tar.gz'
+
+              if not os.path.exists(artifact_path):
+                  print(f"WARNING: No artifact found for {name}, skipping")
+                  continue
+
+              result = subprocess.run(
+                  ['sha256sum', artifact_path],
+                  capture_output=True, text=True, check=True
+              )
+              computed_sha = result.stdout.split()[0]
+              stored_sha = plugin.get('artifactSha256', '')
+
+              if computed_sha != stored_sha:
+                  print(f"MISMATCH {name}: stored={stored_sha[:16]}..., computed={computed_sha[:16]}...")
+                  plugin['artifactSha256'] = computed_sha
+                  updated_plugins.append(name)
+              else:
+                  print(f"OK: {name}")
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              if updated_plugins:
+                  f.write(f"updated_plugins={', '.join(updated_plugins)}\n")
+                  f.write("changed=true\n")
+                  with open('plugins.json', 'w') as out:
+                      json.dump(data, out, indent=2)
+                  print(f"Updated plugins: {', '.join(updated_plugins)}")
+              else:
+                  f.write("changed=false\n")
+                  print("No updates needed - all checksums match.")
+          PYEOF
+
+      - name: Create PR
+        if: needs.update.outputs.changed == 'true'
+        run: |
+          BRANCH="checksum-update-$(date +%Y%m%d%H%M%S)"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add plugins.json
+          git commit -m "Update checksums"
+          git push origin "$BRANCH" -o ci.skip
+          UPDATED="${{ needs.update.outputs.updated_plugins }}"
+          gh pr create --title "Update checksums" --body "Updated checksums for: $UPDATED" --base master
+        env:
+          GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
