@@ -90,7 +90,7 @@ jobs:
           changed = []
           updated = []
 
-          for entry in plugins:
+          for entry in plugins.get('plugins', []):
               name = entry.get('name')
               ref = entry.get('ref', '')
               stored_sha = entry.get('artifactSha256', '')
