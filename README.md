@@ -11,7 +11,7 @@ single plugin repo URL directly.
 
 | Plugin | Type | Version | Min Server | Repo |
 |---|---|---|---|---|
-| AniDB | metadata-provider | 0.4.0 | ≥ 1.2.0 | [phlix-plugin-anidb](https://github.com/detain/phlix-plugin-anidb) |
+| AniDB | metadata-provider | 0.4.1 | ≥ 1.2.0 | [phlix-plugin-anidb](https://github.com/detain/phlix-plugin-anidb) |
 | AniList | metadata-provider | 0.4.0 | ≥ 1.2.0 | [phlix-plugin-anilist](https://github.com/detain/phlix-plugin-anilist) |
 | Last.fm | scrobbler | 1.2.0 | ≥ 1.2.0 | [phlix-plugin-lastfm](https://github.com/detain/phlix-plugin-lastfm) |
 | MusicBrainz | metadata-provider | 0.4.0 | ≥ 1.2.0 | [phlix-plugin-musicbrainz](https://github.com/detain/phlix-plugin-musicbrainz) |
@@ -45,9 +45,9 @@ moving branch.
       "summary": "Anime metadata from AniDB.",
       "description": "AniDB metadata provider — …",
       "repo": "https://github.com/detain/phlix-plugin-anidb",
-      "ref": "215717b8d13171f4a37c62ec1cecb6cbd8dbc110",
-      "artifactSha256": "151c642c9a701d079a0b729913b28faaf3d4a668a21a2ee383149efa69e52017",
-      "version": "0.4.0",
+      "ref": "4b80320afcaf876767717d027b5200f69f2ab5b8",
+      "artifactSha256": "a9854f188ac0a4b8dc629ecc25411a142b3b155058b9a67ba78a60d77be2dd66",
+      "version": "0.4.1",
       "minServerVersion": "1.2.0",
       "verified": true,
       "deprecated": false,
@@ -102,7 +102,11 @@ sha=$(curl -sL https://github.com/detain/phlix-plugin-<x>/archive/$ref.tar.gz | 
 Never bump `ref` without recomputing `artifactSha256` (and vice versa); CI
 validates shape, sort order and every pinned plugin's `plugin.json` manifest, and
 the server rejects an install whose downloaded bytes do not hash to the recorded
-`artifactSha256`.
+`artifactSha256`. A scheduled job
+([`.github/workflows/update-checksums.yml`](.github/workflows/update-checksums.yml),
+every 6 hours) walks the `plugins` array, recomputes each plugin's tarball digest
+and commits `artifactSha256` changes to `plugins.json` — review those commits,
+since a digest that moves without its `ref` violates the lockstep rule above.
 
 ## Validating locally
 
