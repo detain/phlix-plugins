@@ -31,7 +31,11 @@ jobs:
           gh api repos/detain/${{ matrix.plugin }}/contents \
             --jq '.[] | select(.name == "plugins.json") | .download_url' \
             > /tmp/plugins_json_url_${{ matrix.plugin }}.txt 2>&1 || true
-          REF=$(gh api repos/detain/${{ matrix.plugin }} --jq '.default_branch')
+          REF=$(gh api repos/detain/${{ matrix.plugin }} --jq '.default_branch') || REF="master"
+          if [ -z "$REF" ]; then
+            echo "ERROR: Could not determine default branch for ${{ matrix.plugin }}"
+            exit 1
+          fi
           curl -sL \
             -H "Authorization: bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
