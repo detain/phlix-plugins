@@ -155,7 +155,8 @@ class TestPluginType:
         "subtitle-provider",
         "notifier",
         "player",
-        "integration"
+        "integration",
+        "ui-theme",
     }
 
     def test_all_types_are_valid(self, plugins):

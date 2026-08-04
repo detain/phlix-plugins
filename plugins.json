@@ -164,6 +164,28 @@
       ]
     },
     {
+      "name": "phlix-plugin-sample-theme",
+      "title": "Sample Theme",
+      "type": "ui-theme",
+      "summary": "Two example UI themes — the reference ui-theme plugin.",
+      "description": "Reference ui-theme plugin. Adds 'Sample Dusk' (a cool blue re-hue extending the built-in Midnight) and 'Sample Dusk (High Contrast)' to Settings -> Appearance, and doubles as the copy-me starting point for writing your own theme: one entry class implementing ThemeSourceInterface, returning a validated token map of literal colour values.",
+      "repo": "https://github.com/detain/phlix-plugin-sample-theme",
+      "ref": "1ea573b629e647bdfc63c426c98d25c5792e9bcf",
+      "artifactSha256": "44d14df3accfa971bae4eccd473348628ab4a7aaa0d1249657d31c6217b76db2",
+      "version": "1.0.0",
+      "minServerVersion": "0.44.0",
+      "verified": true,
+      "deprecated": false,
+      "yanked": false,
+      "author": "detain",
+      "tags": [
+        "theme",
+        "ui-theme",
+        "appearance",
+        "example"
+      ]
+    },
+    {
       "name": "phlix-plugin-trakt",
       "title": "Trakt",
       "type": "scrobbler",
