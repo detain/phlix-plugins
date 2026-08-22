@@ -1,1 +1,3 @@
 .caliber/
+__pycache__/
+*.pyc
