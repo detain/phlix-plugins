@@ -8,52 +8,11 @@ on:
   schedule:
     - cron: '0 */6 * * *'
 
-jobs:
-  compute-checksums:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        plugin:
-          - phlix-plugin-anidb
-          - phlix-plugin-anilist
-          - phlix-plugin-lastfm
-          - phlix-plugin-musicbrainz
-          - phlix-plugin-myanimelist
-          - phlix-plugin-omdb
-          - phlix-plugin-opensubtitles
-          - phlix-plugin-trakt
-    steps:
-      - name: Download tarball
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh api repos/detain/${{ matrix.plugin }}/contents \
-            --jq '.[] | select(.name == "plugins.json") | .download_url' \
-            > /tmp/plugins_json_url_${{ matrix.plugin }}.txt 2>&1 || true
-          REF=$(gh api repos/detain/${{ matrix.plugin }} --jq '.default_branch') || REF="master"
-          if [ -z "$REF" ]; then
-            echo "ERROR: Could not determine default branch for ${{ matrix.plugin }}"
-            exit 1
-          fi
-          curl -sL \
-            -H "Authorization: bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/detain/${{ matrix.plugin }}/tarball/$REF" \
-            -o /tmp/plugin_${{ matrix.plugin }}.tar.gz
-          echo "tarball_size=$(wc -c < /tmp/plugin_${{ matrix.plugin }}.tar.gz)" >> $GITHUB_OUTPUT
-      - name: Compute SHA256
-        run: |
-          sha256sum /tmp/plugin_${{ matrix.plugin }}.tar.gz | awk '{print $1}' > /tmp/sha256_${{ matrix.plugin }}.txt
-          cat /tmp/sha256_${{ matrix.plugin }}.txt
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: sha256_${{ matrix.plugin }}
-          path: /tmp/sha256_${{ matrix.plugin }}.txt
+permissions:
+  contents: write
 
-  update:
-    needs: compute-checksums
+jobs:
+  update-checksums:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -62,10 +21,10 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 1
 
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: /tmp/checksums
+      - name: Verify php available
+        run: |
+          command -v php || { echo "ERROR: php CLI not available"; exit 1; }
+          php -v | head -1
 
       - name: Get plugins.json
         env:
@@ -74,60 +33,308 @@ jobs:
           # Verify the file is valid JSON before proceeding
           gh api repos/detain/phlix-plugins/contents/plugins.json --jq '.content' \
             | base64 -d > /tmp/plugins.json
-          python3 -c "import json; json.load(open('/tmp/plugins.json'))" \
+          php -r 'json_decode(file_get_contents("/tmp/plugins.json"), true, 512, JSON_THROW_ON_ERROR); echo "plugins.json is valid JSON\n";' \
             || { echo "ERROR: plugins.json is not valid JSON"; cat /tmp/plugins.json; exit 1; }
-          echo "plugins.json is valid JSON"
 
       - name: Compute updated checksums
         id: compute
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          python3 << 'PYEOF'
-          import json
-          import os
+          php << 'PHPEOF'
+          <?php
+          declare(strict_types=1);
 
-          # Load plugins.json
-          with open('/tmp/plugins.json') as f:
-              plugins = json.load(f)
+          // Phlix plugin catalog updater. Phases:
+          //   A. Discover candidate plugin repos (GitHub topic search, org:detain)
+          //   B. Per-repo fetch: default branch -> head sha -> tarball -> sha256 -> plugin.json
+          //   C. Merge into the catalog: update drifted checksums, auto-add new
+          //      plugins (manifest-validated), then write the catalog back into the
+          //      checkout (GITHUB_WORKSPACE/plugins.json).
+          //
+          // Robustness contract: one malformed repo must never kill the job — every
+          // per-repo failure prints "SKIP <name>: reason" and continues with the next
+          // repo. The script exits 1 only for discovery failure, an unparseable
+          // catalog, or a JSON encode failure.
 
-          changed = []
-          updated = []
+          const PLUGIN_NAME_RE = '/^phlix-plugin-[a-z0-9][a-z0-9-]*$/';
+          const SHA40_RE = '/^[0-9a-f]{40}$/';
+          const SHA64_RE = '/^[0-9a-f]{64}$/';
+          const SEMVER_RE = '/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/';
+          const CATALOG_TYPES = [
+              'metadata-provider',
+              'scrobbler',
+              'subtitle-provider',
+              'notifier',
+              'player',
+              'integration',
+              'ui-theme',
+          ];
 
-          for entry in plugins.get('plugins', []):
-              name = entry.get('name')
-              ref = entry.get('ref', '')
-              stored_sha = entry.get('artifactSha256', '')
+          function envOr(string $key, string $default): string
+          {
+              $value = getenv($key);
+              return ($value === false || trim($value) === '') ? $default : trim($value);
+          }
 
-              sha_file = f'/tmp/checksums/sha256_{name}.txt'
-              if not os.path.exists(sha_file):
-                  continue
+          function stateDir(): string
+          {
+              // PHLIX_STATE_DIR exists only for local simulation; CI keeps /tmp.
+              return envOr('PHLIX_STATE_DIR', '/tmp');
+          }
 
-              with open(sha_file) as f:
-                  computed_sha = f.read().strip()
+          function skipFetch(): bool
+          {
+              return envOr('PHLIX_SKIP_FETCH', '') !== '';
+          }
 
-              if computed_sha != stored_sha:
-                  print(f"Plugin {name}: {stored_sha[:16]}... -> {computed_sha[:16]}...")
-                  entry['artifactSha256'] = computed_sha
-                  changed.append(name)
-                  updated.append(f"{name}: {computed_sha[:16]}")
+          function readManifest(string $path): ?array
+          {
+              if (!is_file($path)) {
+                  return null;
+              }
+              try {
+                  $manifest = json_decode((string) file_get_contents($path), true, 512, JSON_THROW_ON_ERROR);
+                  return is_array($manifest) ? $manifest : null;
+              } catch (JsonException $e) {
+                  return null;
+              }
+          }
 
-          if changed:
-              with open('plugins.json', 'w') as f:
-                  json.dump(plugins, f, indent=2, ensure_ascii=False)
-              print(f"CHANGED_PLUGINS={','.join(changed)}")
-              print("changed=true")
-              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-                  f.write(f"CHANGED_PLUGINS={','.join(changed)}\n")
-                  f.write("changed=true\n")
-                  f.write(f"UPDATED={','.join(updated)}\n")
-          else:
-              print("No checksums changed")
-              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-                  f.write("changed=false\n")
-                  f.write("CHANGED_PLUGINS=\n")
-                  f.write("UPDATED=\n")
-          PYEOF
+          // ---------------------------------------------------------------------------
+          // Phase A: discover candidate repos (topic search scoped to the detain org)
+          // ---------------------------------------------------------------------------
+          $discoveryJson = getenv('PHLIX_DISCOVERY_JSON');
+          if ($discoveryJson === false || trim($discoveryJson) === '') {
+              $cmd = 'gh api --paginate "search/repositories?q=topic:phlix-plugin+org:detain&per_page=100" --jq \'[.items[] | select(.archived == false) | .name]\' 2>&1';
+              $discoveryJson = trim((string) shell_exec($cmd));
+          }
+          $repos = json_decode($discoveryJson, true);
+          if (!is_array($repos) || count($repos) === 0) {
+              fwrite(STDERR, "ERROR: discovery returned no repos (broken search/token? raw output follows)\n" . $discoveryJson . "\n");
+              exit(1);
+          }
+          echo 'Discovered ' . count($repos) . " candidate repo(s)\n";
+
+          // ---------------------------------------------------------------------------
+          // Phase B: per-repo fetch -> pinned ref, tarball sha256, plugin manifest
+          // ---------------------------------------------------------------------------
+          $state = [];
+          foreach ($repos as $name) {
+              if (!is_string($name) || !preg_match(PLUGIN_NAME_RE, $name)) {
+                  echo 'SKIP ' . (is_string($name) ? $name : var_export($name, true)) . ": invalid repo name\n";
+                  continue;
+              }
+
+              if (skipFetch()) {
+                  // Local simulation mode: read pre-made fixture files instead of
+                  // shelling out to gh/curl. Fixtures replicate Phase B output:
+                  //   <stateDir>/ref_<name>.txt     40-hex head sha
+                  //   <stateDir>/sha256_<name>.txt  64-hex tarball digest
+                  //   <stateDir>/manifest_<name>.json  optional plugin.json
+                  $dir = stateDir();
+                  $ref = trim((string) file_get_contents($dir . '/ref_' . $name . '.txt'));
+                  $sha256 = trim((string) file_get_contents($dir . '/sha256_' . $name . '.txt'));
+                  if (!preg_match(SHA40_RE, $ref) || !preg_match(SHA64_RE, $sha256)) {
+                      echo 'SKIP ' . $name . ': no fixture state files in ' . $dir . "\n";
+                      continue;
+                  }
+                  $state[$name] = [
+                      'ref' => $ref,
+                      'sha256' => $sha256,
+                      'manifest' => readManifest($dir . '/manifest_' . $name . '.json'),
+                  ];
+                  continue;
+              }
+
+              // The name gate above runs BEFORE $name is interpolated into any shell
+              // command below — the regex permits only [a-z0-9-], so injection is
+              // impossible by construction.
+              $branch = trim((string) shell_exec('gh api repos/detain/' . $name . ' --jq \'.default_branch\' 2>&1'));
+              if ($branch === '') {
+                  $branch = 'master';
+              }
+
+              $sha = trim((string) shell_exec('gh api repos/detain/' . $name . '/commits/' . $branch . ' --jq \'.sha\' 2>&1'));
+              if (!preg_match(SHA40_RE, $sha)) {
+                  echo 'SKIP ' . $name . ": invalid ref '" . $sha . "'\n";
+                  continue;
+              }
+
+              $dir = stateDir();
+              $tarball = $dir . '/phlix_plugin_' . $name . '.tar.gz';
+              shell_exec('curl -sL -H "Authorization: bearer ' . envOr('GH_TOKEN', '') . '" "https://api.github.com/repos/detain/' . $name . '/tarball/' . $sha . '" -o ' . $tarball . ' 2>&1');
+              if (!is_file($tarball) || filesize($tarball) <= 0) {
+                  echo 'SKIP ' . $name . ": tarball download failed or empty\n";
+                  continue;
+              }
+
+              $computed = trim((string) shell_exec('sha256sum ' . $tarball . ' | awk \'{print $1}\''));
+              if (!preg_match(SHA64_RE, $computed)) {
+                  echo 'SKIP ' . $name . ": invalid sha256 '" . $computed . "'\n";
+                  continue;
+              }
+
+              $extract = $dir . '/phlix_extract_' . $name;
+              shell_exec('rm -rf ' . $extract . ' && mkdir -p ' . $extract . ' && tar -xzf ' . $tarball . ' -C ' . $extract . ' --strip-components=1 2>&1');
+
+              $state[$name] = [
+                  'ref' => $sha,
+                  'sha256' => $computed,
+                  'manifest' => readManifest($extract . '/plugin.json'),
+              ];
+          }
+
+          // ---------------------------------------------------------------------------
+          // Phase C: merge fetched state into the catalog (pristine copy read from
+          // /tmp/plugins.json as fetched from GitHub in Step 3)
+          // ---------------------------------------------------------------------------
+          try {
+              $plugins = json_decode((string) file_get_contents('/tmp/plugins.json'), true, 512, JSON_THROW_ON_ERROR);
+          } catch (JsonException $e) {
+              fwrite(STDERR, 'ERROR: plugins.json is not valid JSON: ' . $e->getMessage() . "\n");
+              exit(1);
+          }
+          if (!is_array($plugins) || !isset($plugins['plugins']) || !is_array($plugins['plugins'])) {
+              fwrite(STDERR, "ERROR: plugins.json has no 'plugins' array\n");
+              exit(1);
+          }
+
+          $existing = [];
+          foreach ($plugins['plugins'] as $entry) {
+              if (is_array($entry) && isset($entry['name']) && is_string($entry['name'])) {
+                  $existing[$entry['name']] = true;
+              }
+          }
+
+          $changed = false;
+          $changedPlugins = [];
+          $updated = [];
+
+          // UPDATE existing entries whose tarball sha256 drifted from the stored pin.
+          foreach ($plugins['plugins'] as &$entry) {
+              $name = isset($entry['name']) && is_string($entry['name']) ? $entry['name'] : '';
+              if ($name === '' || !isset($state[$name]['sha256'])) {
+                  continue;
+              }
+              $stored = isset($entry['artifactSha256']) ? $entry['artifactSha256'] : '';
+              $computed = $state[$name]['sha256'];
+              if ($computed !== $stored) {
+                  echo 'Plugin ' . $name . ': ' . substr($stored, 0, 16) . '... -> ' . substr($computed, 0, 16) . "...\n";
+                  $entry['artifactSha256'] = $computed;
+                  $changed = true;
+                  $changedPlugins[] = $name;
+                  $updated[] = $name . ': ' . substr($computed, 0, 16);
+              }
+          }
+          unset($entry);
+
+          // ADD discovered repos not yet in the catalog — but only genuine plugins
+          // with a valid plugin.json manifest at the pinned ref. Auto-added entries
+          // are marked verified=false on purpose: the server install-blocks them in
+          // default-deny mode until a human reviews and verifies them.
+          foreach ($state as $name => $st) {
+              if (isset($existing[$name])) {
+                  continue;
+              }
+              if (!is_array($st['manifest'])) {
+                  echo 'SKIP ' . $name . ": not a plugin (no valid plugin.json manifest)\n";
+                  continue;
+              }
+              $manifest = $st['manifest'];
+
+              $manifestName = isset($manifest['name']) && is_string($manifest['name']) ? $manifest['name'] : $name;
+              if (!preg_match(PLUGIN_NAME_RE, $manifestName)) {
+                  echo 'SKIP ' . $name . ": manifest name '" . $manifestName . "' is not a valid plugin name\n";
+                  continue;
+              }
+
+              $type = isset($manifest['type']) && is_string($manifest['type']) ? $manifest['type'] : '';
+              if (!in_array($type, CATALOG_TYPES, true)) {
+                  echo 'SKIP ' . $name . ": manifest type '" . $type . "' not representable in catalog enum\n";
+                  continue;
+              }
+
+              $version = isset($manifest['version']) && is_string($manifest['version']) ? $manifest['version'] : '';
+              if (!preg_match(SEMVER_RE, $version)) {
+                  echo 'SKIP ' . $name . ": manifest version '" . $version . "' is not valid semver\n";
+                  continue;
+              }
+
+              $minServerVersion = isset($manifest['phlix_min_server_version']) && is_string($manifest['phlix_min_server_version'])
+                  ? $manifest['phlix_min_server_version']
+                  : null;
+              if ($minServerVersion !== null && !preg_match(SEMVER_RE, $minServerVersion)) {
+                  echo 'SKIP ' . $name . ": manifest phlix_min_server_version '" . $minServerVersion . "' is not valid semver\n";
+                  continue;
+              }
+
+              $entry = [
+                  'name' => $manifestName,
+                  'title' => ucwords(str_replace('-', ' ', substr($name, strlen('phlix-plugin-')))),
+                  'type' => $type,
+                  'repo' => 'https://github.com/detain/' . $name,
+                  'ref' => $st['ref'],
+                  'artifactSha256' => $st['sha256'],
+                  'version' => $version,
+              ];
+              if ($minServerVersion !== null) {
+                  $entry['minServerVersion'] = $minServerVersion;
+              }
+              $entry['verified'] = false;
+              $entry['deprecated'] = false;
+              $entry['yanked'] = false;
+              $entry['author'] = 'detain';
+
+              $plugins['plugins'][] = $entry;
+              $existing[$manifestName] = true;
+              $changed = true;
+              $changedPlugins[] = $manifestName;
+              echo 'ADD ' . $manifestName . '@' . substr($st['ref'], 0, 12) . ' (' . $type . ', v' . $version . ")\n";
+          }
+
+          // ---------------------------------------------------------------------------
+          // Write back: sort by name (validate-catalog.yml blocks on ordering), then
+          // persist into the CHECKOUT working copy — /tmp/plugins.json is only the
+          // pristine read source. Writing to the checkout is what makes the Push step
+          // able to stage anything (the latent bug this workflow fixes).
+          // ---------------------------------------------------------------------------
+          $outputFile = getenv('GITHUB_OUTPUT');
+          $appendOutput = static function (string $line) use ($outputFile): void {
+              if ($outputFile !== false && $outputFile !== '') {
+                  file_put_contents($outputFile, $line, FILE_APPEND);
+              }
+          };
+
+          if ($changed) {
+              usort($plugins['plugins'], static function (array $a, array $b): int {
+                  $an = isset($a['name']) && is_string($a['name']) ? $a['name'] : '';
+                  $bn = isset($b['name']) && is_string($b['name']) ? $b['name'] : '';
+                  return strcmp($an, $bn);
+              });
+
+              $pluginsPath = envOr('GITHUB_WORKSPACE', '.') . '/plugins.json';
+              $json = json_encode($plugins, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+              if ($json === false) {
+                  fwrite(STDERR, 'ERROR: could not encode catalog JSON: ' . json_last_error_msg() . "\n");
+                  exit(1);
+              }
+              file_put_contents($pluginsPath, $json . "\n");
+              echo 'wrote ' . $pluginsPath . "\n";
+
+              echo "changed=true\n";
+              echo 'CHANGED_PLUGINS=' . implode(',', $changedPlugins) . "\n";
+              echo 'UPDATED=' . implode(',', $updated) . "\n";
+              $appendOutput("changed=true\n");
+              $appendOutput('CHANGED_PLUGINS=' . implode(',', $changedPlugins) . "\n");
+              $appendOutput('UPDATED=' . implode(',', $updated) . "\n");
+          } else {
+              echo "No checksums changed\n";
+              $appendOutput("changed=false\n");
+              $appendOutput("CHANGED_PLUGINS=\n");
+              $appendOutput("UPDATED=\n");
+          }
+          PHPEOF
 
       - name: Push changes
         if: steps.compute.outputs.changed == 'true'
@@ -135,5 +342,12 @@ jobs:
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           git add plugins.json
+          git diff --cached --quiet || git commit -m 'chore(ci): update plugin catalog checksums'
           git diff --cached --stat
-          git push
+          # retry pull-rebase-push so cron runs don't clobber concurrent pushes; fail LOUDLY if it can't land
+          for i in 1 2 3; do
+            if git pull --rebase --autostash && git push; then exit 0; fi
+            sleep 5
+          done
+          echo "ERROR: could not push catalog update after 3 attempts" >&2
+          exit 1
