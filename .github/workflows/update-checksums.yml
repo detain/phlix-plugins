@@ -33,7 +33,7 @@ jobs:
           # Verify the file is valid JSON before proceeding
           gh api repos/detain/phlix-plugins/contents/plugins.json --jq '.content' \
             | base64 -d > /tmp/plugins.json
-          php -r 'json_decode(file_get_contents("/tmp/plugins.json"), true, 512, JSON_THROW_ON_ERROR); echo "plugins.json is valid JSON\n";' \
+          php -r 'json_decode(file_get_contents("/tmp/plugins.json"), true, 512, JSON_THROW_ON_ERROR); echo "plugins.json is valid JSON" . PHP_EOL;' \
             || { echo "ERROR: plugins.json is not valid JSON"; cat /tmp/plugins.json; exit 1; }
 
       - name: Compute updated checksums
@@ -58,6 +58,7 @@ jobs:
           // catalog, or a JSON encode failure.
 
           const PLUGIN_NAME_RE = '/^phlix-plugin-[a-z0-9][a-z0-9-]*$/';
+          const SAFE_BRANCH_RE = '/^[A-Za-z0-9][A-Za-z0-9._\/-]*$/';
           const SHA40_RE = '/^[0-9a-f]{40}$/';
           const SHA64_RE = '/^[0-9a-f]{64}$/';
           const SEMVER_RE = '/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/';
@@ -99,6 +100,20 @@ jobs:
               } catch (JsonException $e) {
                   return null;
               }
+          }
+
+          function isGzipFile(string $path): bool
+          {
+              // Cheap magic-byte check: a real codeload tarball starts with the
+              // gzip header (0x1f 0x8b). Error bodies from the GitHub API never do,
+              // so this rejects 404/401/rate-limit responses before hashing.
+              $fh = fopen($path, 'rb');
+              if ($fh === false) {
+                  return false;
+              }
+              $magic = fread($fh, 2);
+              fclose($fh);
+              return $magic === "\x1f\x8b";
           }
 
           // ---------------------------------------------------------------------------
@@ -154,6 +169,12 @@ jobs:
               if ($branch === '') {
                   $branch = 'master';
               }
+              // Branch names legally allow ; $ ` & | quotes and parens — a hostile
+              // default branch must never reach a shell string. Gate before use.
+              if (!preg_match(SAFE_BRANCH_RE, $branch)) {
+                  echo 'SKIP ' . $name . ": unsafe branch name '" . $branch . "'\n";
+                  continue;
+              }
 
               $sha = trim((string) shell_exec('gh api repos/detain/' . $name . '/commits/' . $branch . ' --jq \'.sha\' 2>&1'));
               if (!preg_match(SHA40_RE, $sha)) {
@@ -166,6 +187,12 @@ jobs:
               shell_exec('curl -sL -H "Authorization: bearer ' . envOr('GH_TOKEN', '') . '" "https://api.github.com/repos/detain/' . $name . '/tarball/' . $sha . '" -o ' . $tarball . ' 2>&1');
               if (!is_file($tarball) || filesize($tarball) <= 0) {
                   echo 'SKIP ' . $name . ": tarball download failed or empty\n";
+                  continue;
+              }
+              if (!isGzipFile($tarball)) {
+                  // curl -sL without -f would happily save a JSON error body (404/401/rate-limit)
+                  // — never let it reach sha256sum, or an existing entry's pin gets corrupted.
+                  echo 'SKIP ' . $name . ": tarball download failed (not a gzip archive)\n";
                   continue;
               }
 
@@ -183,6 +210,13 @@ jobs:
                   'sha256' => $computed,
                   'manifest' => readManifest($extract . '/plugin.json'),
               ];
+          }
+
+          // Every repo skipped/failed (e.g. gh auth died after discovery) — fail loudly
+          // instead of reporting a silent successful no-op merge back to the push step.
+          if (count($state) === 0) {
+              fwrite(STDERR, "ERROR: all discovered repos were skipped or failed — nothing to merge (auth/network problem?)\n");
+              exit(1);
           }
 
           // ---------------------------------------------------------------------------
@@ -212,6 +246,9 @@ jobs:
           $updated = [];
 
           // UPDATE existing entries whose tarball sha256 drifted from the stored pin.
+          // ref and artifactSha256 MUST move in lockstep (the server verifies the
+          // tarball of the pinned ref against artifactSha256) — so both are written
+          // and both are reported when they drift.
           foreach ($plugins['plugins'] as &$entry) {
               $name = isset($entry['name']) && is_string($entry['name']) ? $entry['name'] : '';
               if ($name === '' || !isset($state[$name]['sha256'])) {
@@ -220,8 +257,14 @@ jobs:
               $stored = isset($entry['artifactSha256']) ? $entry['artifactSha256'] : '';
               $computed = $state[$name]['sha256'];
               if ($computed !== $stored) {
-                  echo 'Plugin ' . $name . ': ' . substr($stored, 0, 16) . '... -> ' . substr($computed, 0, 16) . "...\n";
+                  $line = 'Plugin ' . $name . ': ' . substr($stored, 0, 16) . '... -> ' . substr($computed, 0, 16) . '...';
                   $entry['artifactSha256'] = $computed;
+                  $storedRef = isset($entry['ref']) && is_string($entry['ref']) ? $entry['ref'] : '';
+                  if ($storedRef !== $state[$name]['ref']) {
+                      $entry['ref'] = $state[$name]['ref'];
+                      $line .= ' (ref ' . substr($storedRef, 0, 12) . '... -> ' . substr($state[$name]['ref'], 0, 12) . '...)';
+                  }
+                  echo $line . "\n";
                   $changed = true;
                   $changedPlugins[] = $name;
                   $updated[] = $name . ': ' . substr($computed, 0, 16);
@@ -244,6 +287,12 @@ jobs:
               $manifest = $st['manifest'];
 
               $manifestName = isset($manifest['name']) && is_string($manifest['name']) ? $manifest['name'] : $name;
+              if ($manifestName !== $name) {
+                  // Catalog entries must have name and repo agree (the repo URL is
+                  // derived from the repo name); a mismatch means a renamed/forked repo.
+                  echo 'SKIP ' . $name . ": manifest name '" . $manifestName . "' does not match repo name\n";
+                  continue;
+              }
               if (!preg_match(PLUGIN_NAME_RE, $manifestName)) {
                   echo 'SKIP ' . $name . ": manifest name '" . $manifestName . "' is not a valid plugin name\n";
                   continue;
@@ -319,7 +368,20 @@ jobs:
                   fwrite(STDERR, 'ERROR: could not encode catalog JSON: ' . json_last_error_msg() . "\n");
                   exit(1);
               }
-              file_put_contents($pluginsPath, $json . "\n");
+              // PHP's JSON_PRETTY_PRINT emits 4-space indent; the catalog is 2-space.
+              // Halve every line's leading run so the first write is not a full-file diff.
+              $json = preg_replace_callback(
+                  '/^( +)/m',
+                  static fn (array $m): string => str_repeat(' ', (int) (strlen($m[1]) / 2)),
+                  $json
+              ) ?? $json;
+              // Write the file FIRST, then emit changed=true — the push step must
+              // never be told "changed" for a catalog that failed to persist.
+              $written = file_put_contents($pluginsPath, $json . "\n");
+              if ($written === false) {
+                  fwrite(STDERR, 'ERROR: could not write catalog to ' . $pluginsPath . "\n");
+                  exit(1);
+              }
               echo 'wrote ' . $pluginsPath . "\n";
 
               echo "changed=true\n";
