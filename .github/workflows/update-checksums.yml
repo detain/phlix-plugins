@@ -184,7 +184,13 @@ jobs:
 
               $dir = stateDir();
               $tarball = $dir . '/phlix_plugin_' . $name . '.tar.gz';
-              shell_exec('curl -sL -H "Authorization: bearer ' . envOr('GH_TOKEN', '') . '" "https://api.github.com/repos/detain/' . $name . '/tarball/' . $sha . '" -o ' . $tarball . ' 2>&1');
+              // Codeload archive URL — the SAME artifact form the server downloads
+              // (github.com/<owner>/<repo>/archive/<ref>.tar.gz, per the schema) and
+              // that validate-catalog.yml hashes. The api.github.com tarball endpoint
+              // produces DIFFERENT bytes for the same commit, which would corrupt
+              // every artifactSha256. -f makes HTTP errors fail instead of saving an
+              // error body (the gzip-magic check below remains the backstop).
+              shell_exec('curl -fsSL "https://github.com/detain/' . $name . '/archive/' . $sha . '.tar.gz" -o ' . $tarball . ' 2>&1');
               if (!is_file($tarball) || filesize($tarball) <= 0) {
                   echo 'SKIP ' . $name . ": tarball download failed or empty\n";
                   continue;

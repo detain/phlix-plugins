@@ -275,10 +275,12 @@ class TestLockstepRefSha:
 class TestSpecificPlugins:
     """Tests for specific plugins in the catalog."""
 
-    def test_all_official_plugins_have_verified_true(self, plugins):
-        """All plugins in the official catalog should have verified: true."""
+    def test_unverified_plugins_are_auto_discovered(self, plugins):
+        """Un-verified entries are expected: the update-checksums workflow auto-adds
+        newly discovered plugins with verified=false so the server install-blocks them
+        in default-deny mode until a maintainer reviews and verifies them."""
         for plugin in plugins:
-            assert plugin.get("verified") is True, f"Plugin {plugin['name']} should be verified"
+            assert plugin.get("verified") in (True, False), f"Plugin {plugin['name']} verified must be boolean"
 
     def test_all_official_plugins_are_not_deprecated(self, plugins):
         """All plugins in the official catalog should not be deprecated."""
@@ -300,19 +302,29 @@ class TestSpecificPlugins:
         for plugin in plugins:
             assert "author" in plugin, f"Plugin {plugin['name']} missing author"
 
-    def test_plugins_have_summary(self, plugins):
-        """All plugins should have a summary."""
+    def test_verified_plugins_have_summary(self, plugins):
+        """Verified (curated) plugins should have a summary. Auto-added un-verified
+        entries have none — the manifest carries no summary and curation happens
+        during human verification."""
         for plugin in plugins:
+            if not plugin.get("verified"):
+                continue
             assert "summary" in plugin, f"Plugin {plugin['name']} missing summary"
 
-    def test_plugins_have_description(self, plugins):
-        """All plugins should have a description."""
+    def test_verified_plugins_have_description(self, plugins):
+        """Verified (curated) plugins should have a description. Auto-added
+        un-verified entries have none until a maintainer curates them."""
         for plugin in plugins:
+            if not plugin.get("verified"):
+                continue
             assert "description" in plugin, f"Plugin {plugin['name']} missing description"
 
-    def test_plugins_have_tags(self, plugins):
-        """All plugins should have tags."""
+    def test_verified_plugins_have_tags(self, plugins):
+        """Verified (curated) plugins should have non-empty tags. Auto-added
+        un-verified entries have none until a maintainer curates them."""
         for plugin in plugins:
+            if not plugin.get("verified"):
+                continue
             assert "tags" in plugin, f"Plugin {plugin['name']} missing tags"
             assert len(plugin["tags"]) > 0, f"Plugin {plugin['name']} has empty tags"
 
