@@ -562,6 +562,14 @@ jobs:
                   continue;
               }
 
+              $devMinServer = (isset($manifest['phlix_min_server_version']) && is_string($manifest['phlix_min_server_version']) && preg_match(SEMVER_RE, $manifest['phlix_min_server_version']))
+                  ? $manifest['phlix_min_server_version']
+                  : null;
+              if ($devMinServer === null) {
+                  echo 'SKIP ' . $name . ": HEAD plugin.json has no valid phlix_min_server_version — not a contract-valid plugin (existing entries stay pinned to their last valid ref)\n";
+                  continue;
+              }
+
               // synced tags: repo topics minus the family denylist, union the curated
               // tags already present on any of this plugin's catalog entries.
               $curatedTags = [];
@@ -598,21 +606,40 @@ jobs:
               // ---- RELEASE entry (only when the repo has git tags this run) ----
               if ($st['tagged'] !== null) {
                   $tagged = $st['tagged'];
-                  $tagVersion = null;
-                  if (is_array($tagged['manifest']) && isset($tagged['manifest']['version']) && is_string($tagged['manifest']['version']) && preg_match(SEMVER_RE, $tagged['manifest']['version'])) {
-                      $tagVersion = $tagged['manifest']['version']; // manifest version at the tag commit is authoritative
-                  } elseif (preg_match(SEMVER_RE, $tagged['version'])) {
-                      $tagVersion = $tagged['version']; // graceful fallback: cleaned tag name (old tags predate the version field)
-                  }
-                  if ($tagVersion === null) {
-                      echo 'SKIP ' . $name . ": release entry skipped — tag '" . $tagged['name'] . "' carries no semver version (manifest version missing/invalid at the tag commit; cleaned tag name not semver)\n";
+                  // Install-contract gate on the TAGGED manifest: validate-catalog.yml's
+                  // blocking job validates every pinned plugin.json against the phlix-shared
+                  // manifest schema, so a tag whose manifest predates that contract (missing
+                  // phlix_min_server_version, a mistyped manifest name, no plugin.json at all)
+                  // must never be pinned as a release entry — the repo degrades to dev-only.
+                  $tagManifest = $tagged['manifest'];
+                  $tagManifestName = (is_array($tagManifest) && isset($tagManifest['name']) && is_string($tagManifest['name'])) ? $tagManifest['name'] : '';
+                  $tagMinServer = (is_array($tagManifest) && isset($tagManifest['phlix_min_server_version']) && is_string($tagManifest['phlix_min_server_version']) && preg_match(SEMVER_RE, $tagManifest['phlix_min_server_version']))
+                      ? $tagManifest['phlix_min_server_version']
+                      : null;
+                  $releaseSkipReason = null;
+                  if (!is_array($tagManifest)) {
+                      $releaseSkipReason = "no valid plugin.json at tag '" . $tagged['name'] . "'";
+                  } elseif ($tagManifestName !== $name || !preg_match(PLUGIN_NAME_RE, $tagManifestName)) {
+                      $releaseSkipReason = "tag '" . $tagged['name'] . "' manifest name '" . $tagManifestName . "' does not match the repo name/pattern";
+                  } elseif ($tagMinServer === null) {
+                      $releaseSkipReason = "tag '" . $tagged['name'] . "' manifest has no valid phlix_min_server_version";
                   } else {
-                      $releaseType = (is_array($tagged['manifest']) && isset($tagged['manifest']['type']) && is_string($tagged['manifest']['type']) && in_array($tagged['manifest']['type'], CATALOG_TYPES, true))
-                          ? $tagged['manifest']['type']
+                      $tagVersion = null;
+                      if (isset($tagManifest['version']) && is_string($tagManifest['version']) && preg_match(SEMVER_RE, $tagManifest['version'])) {
+                          $tagVersion = $tagManifest['version']; // manifest version at the tag commit is authoritative
+                      } elseif (preg_match(SEMVER_RE, $tagged['version'])) {
+                          $tagVersion = $tagged['version']; // graceful fallback: cleaned tag name (old tags predate the version field)
+                      }
+                      if ($tagVersion === null) {
+                          $releaseSkipReason = "tag '" . $tagged['name'] . "' has no semver version (manifest version missing/invalid; cleaned tag name not semver)";
+                      }
+                  }
+                  if ($releaseSkipReason !== null) {
+                      echo 'SKIP ' . $name . ': release entry skipped — ' . $releaseSkipReason . " (keeping dev entry only)\n";
+                  } else {
+                      $releaseType = (isset($tagManifest['type']) && is_string($tagManifest['type']) && in_array($tagManifest['type'], CATALOG_TYPES, true))
+                          ? $tagManifest['type']
                           : $type;
-                      $releaseMinServer = (is_array($tagged['manifest']) && isset($tagged['manifest']['phlix_min_server_version']) && is_string($tagged['manifest']['phlix_min_server_version']) && preg_match(SEMVER_RE, $tagged['manifest']['phlix_min_server_version']))
-                          ? $tagged['manifest']['phlix_min_server_version']
-                          : null;
                       $releaseKey = $name . "\x00" . $tagVersion;
                       $existingIndex = $byKey[$releaseKey] ?? null;
                       $oldVersion = null;
@@ -629,6 +656,7 @@ jobs:
                           $entry['type'] = $releaseType;
                           $entry['title'] = deriveTitle($name);
                           $entry['repo'] = 'https://github.com/detain/' . $name;
+                          $entry['minServerVersion'] = $tagMinServer;
                           $entry['tags'] = $syncedTags;
                           if ($entry !== $oldEntry) {
                               $oldSha = isset($oldEntry['artifactSha256']) && is_string($oldEntry['artifactSha256']) ? $oldEntry['artifactSha256'] : '';
@@ -665,7 +693,7 @@ jobs:
                               'artifactSha256' => $tagged['sha256'],
                               'version' => $tagVersion,
                           ];
-                          if ($releaseMinServer !== null) $entry['minServerVersion'] = $releaseMinServer;
+                          $entry['minServerVersion'] = $tagMinServer; // guaranteed by the install-contract gate
                           $entry['verified'] = $carriedVerified;
                           $entry['deprecated'] = false;
                           $entry['yanked'] = false;
@@ -707,9 +735,6 @@ jobs:
               // verified=false ALWAYS — the dev channel is unstable by design) ----
               $devKey = $name . "\x00" . DEV_VERSION;
               $existingDevIndex = $byKey[$devKey] ?? null;
-              $devMinServer = (isset($manifest['phlix_min_server_version']) && is_string($manifest['phlix_min_server_version']) && preg_match(SEMVER_RE, $manifest['phlix_min_server_version']))
-                  ? $manifest['phlix_min_server_version']
-                  : null;
               if ($existingDevIndex !== null && is_array($plugins['plugins'][$existingDevIndex])) {
                   $oldDevEntry = $plugins['plugins'][$existingDevIndex];
                   $entry = $oldDevEntry;
@@ -719,11 +744,7 @@ jobs:
                   $entry['type'] = $type;
                   $entry['title'] = deriveTitle($name);
                   $entry['repo'] = 'https://github.com/detain/' . $name;
-                  if ($devMinServer !== null) {
-                      $entry['minServerVersion'] = $devMinServer;
-                  } else {
-                      unset($entry['minServerVersion']);
-                  }
+                  $entry['minServerVersion'] = $devMinServer; // guaranteed by the contract gate
                   $entry['verified'] = false;
                   $entry['deprecated'] = false;
                   $entry['yanked'] = false;
@@ -752,7 +773,7 @@ jobs:
                       'artifactSha256' => $st['sha256'],
                       'version' => DEV_VERSION,
                   ];
-                  if ($devMinServer !== null) $entry['minServerVersion'] = $devMinServer;
+                  $entry['minServerVersion'] = $devMinServer; // guaranteed by the contract gate
                   $entry['verified'] = false;
                   $entry['deprecated'] = false;
                   $entry['yanked'] = false;
