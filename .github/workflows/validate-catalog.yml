@@ -3,8 +3,11 @@ name: Validate catalog
 # Validates plugins.json (the trust root the Phlix server reads) on every push
 # and pull request:
 #   1. JSON-Schema conformance against plugins.schema.json (pinned validator).
-#   2. plugins.json is valid JSON AND entries are sorted by `name` with no
-#      duplicate `name` (the "unsorted/undeduped" code-quality gate).
+#   2. plugins.json is valid JSON AND entries are in canonical order (name
+#      ascending, dev-channel entries — version "dev" — last within a name, version
+#      tie-break) with no duplicate (name, version) pairs. The dev channel reuses a
+#      plugin's name, so uniqueness is keyed on (name, version), not the bare name
+#      (the "canonical order/dedup" code-quality gate).
 #   3. (non-blocking) per-entry pin-drift check: download each pinned tarball
 #      and assert its sha256 matches artifactSha256, surfacing drift without
 #      flaking PRs.
@@ -56,24 +59,35 @@ jobs:
               -d plugins.json \
               -c ajv-formats
 
-      - name: Assert plugins.json is valid JSON, sorted by name, no duplicates
+      - name: Assert plugins.json is valid JSON, sorted canonically, no duplicate (name, version) pairs
         run: |
           # `jq -e` already fails (exit 5) on a JSON parse error, so this step
           # doubles as the "valid JSON" assertion. The filter then fails (via
-          # halt_error 1) if the names are out of order or contain a duplicate.
+          # halt_error 1) if plugins.json is out of canonical order or contains duplicate
+          # (name, version) pairs. Canonical order matches the update-checksums workflow's
+          # sort comparator EXACTLY: name ascending, then dev-channel entries last within a
+          # name (the dev entry reuses the plugin name; version literal "dev" vs the semver
+          # release entry), then version ascending as a deterministic tie-break for equal
+          # names: sort_by([.name, (if .version == "dev" then 1 else 0 end), .version]) — 0 sorts before 1,
+          # so releases precede dev entries within a name, same ordering PHP produces with
+          # usort keyed (name, dev-flag, version-string). The dev channel intentionally
+          # duplicates plugin NAMES, so uniqueness is enforced on (name, version) pairs, not
+          # bare names (at most one release entry + one dev entry per plugin name per run of
+          # the workflow, by construction; this gate asserts the resulting invariant: no pair
+          # duplicated, file in canonical order).
           jq -e -r '
-            .plugins | map(.name) as $names
-            | ($names | sort)   as $sorted
-            | ($names | unique) as $uniq
-            | if ($names != $sorted) then
-                "ERROR: plugins are not sorted by name.\n  got:  \($names)\n  want: \($sorted)"
+            .plugins as $p
+            | ($p | sort_by([.name, (if .version == "dev" then 1 else 0 end), .version])) as $sorted
+            | ($p | map([.name, .version])) as $pairs
+            | if ($p != $sorted) then
+                "ERROR: plugins.json is not sorted canonically (name asc, dev last within name; version tie-break).\n  got:  \($pairs | tostring)\n  want: " + (($sorted | map([.name, .version])) | tostring)
                 | halt_error(1)
-              elif ($uniq | length) != ($names | length) then
-                "ERROR: duplicate plugin name(s): "
-                + ([$names[] | select(. as $n | ([$names[] | select(. == $n)] | length) > 1)] | unique | tostring)
+              elif (($pairs | unique) | length) != ($pairs | length) then
+                "ERROR: duplicate (name, version) pair(s): "
+                + ([$pairs[] | select(. as $kv | ([$pairs[] | select(. == $kv)] | length) > 1)] | unique | tostring)
                 | halt_error(1)
               else
-                "OK: \($names | length) entries — valid JSON, sorted by name, no duplicates."
+                "OK: \($pairs | length) entries — valid JSON, canonical order (name, dev-last within name, version tie-break), no duplicate (name, version) pairs."
               end
           ' plugins.json
 

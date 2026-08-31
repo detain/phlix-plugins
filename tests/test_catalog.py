@@ -64,19 +64,26 @@ class TestCatalogSchema:
 
 
 class TestSortOrder:
-    """Tests for sort order and deduplication."""
+    """Tests for canonical order and (name, version) deduplication."""
 
-    def test_plugins_sorted_by_name(self, plugins):
-        """Plugins array must be sorted by name."""
-        names = [p["name"] for p in plugins]
-        sorted_names = sorted(names)
-        assert names == sorted_names, f"Plugins not sorted. Got: {names}"
+    def test_plugins_sorted_canonically(self, plugins):
+        """Plugins array must be sorted canonically: name ascending, dev-channel
+        entries (version "dev") last within a name, version ascending as a
+        deterministic tie-break — the same key validate-catalog.yml's jq gate
+        enforces and the update-checksums workflow's usort comparator produces."""
+        key = lambda p: (p["name"], 1 if p["version"] == "dev" else 0, p["version"])
+        actual = [key(p) for p in plugins]
+        expected = sorted(actual)
+        assert actual == expected, f"Plugins not in canonical order. Got: {actual}"
 
-    def test_no_duplicate_plugin_names(self, plugins):
-        """Plugin names must be unique (no duplicates)."""
-        names = [p["name"] for p in plugins]
-        unique_names = set(names)
-        assert len(names) == len(unique_names), f"Duplicate names found: {[n for n in names if names.count(n) > 1]}"
+    def test_no_duplicate_name_version_pairs(self, plugins):
+        """(name, version) pairs must be unique. The dev channel intentionally
+        reuses a plugin's name (one release entry with a semver version plus one
+        dev entry with version "dev"), so uniqueness is keyed on the pair, not the
+        bare name."""
+        pairs = [(p["name"], p["version"]) for p in plugins]
+        unique_pairs = set(pairs)
+        assert len(pairs) == len(unique_pairs), f"Duplicate (name, version) pairs: {[kv for kv in pairs if pairs.count(kv) > 1]}"
 
 
 class TestPluginName:
@@ -90,10 +97,12 @@ class TestPluginName:
             name = plugin["name"]
             assert self.PLUGIN_NAME_PATTERN.match(name), f"Invalid name format: {name}"
 
-    def test_plugin_names_are_unique(self, plugins):
-        """Plugin names must be unique within the catalog."""
-        names = [p["name"] for p in plugins]
-        assert len(names) == len(set(names)), "Duplicate plugin names found"
+    def test_plugin_names_may_repeat_only_as_dev_channel(self, plugins):
+        """A plugin name may appear more than once ONLY for the dev-channel entry
+        (version "dev"); a name must never have two non-dev (release) entries."""
+        from collections import Counter
+        release_counts = Counter(p["name"] for p in plugins if p["version"] != "dev")
+        assert all(c == 1 for c in release_counts.values()), f"Multiple release entries: {[n for n, c in release_counts.items() if c > 1]}"
 
 
 class TestPluginRepo:
@@ -133,17 +142,34 @@ class TestArtifactSha256:
 
 
 class TestPluginVersion:
-    """Tests for plugin version (semver) format."""
+    """Tests for plugin version format: semver for release entries, literal "dev"
+    for dev-channel entries."""
 
     SEMVER_PATTERN = re.compile(
         r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*)?$"
     )
 
-    def test_all_versions_match_semver(self, plugins):
-        """All versions must be valid semantic versions."""
+    def test_all_versions_are_dev_or_semver(self, plugins):
+        """All versions must be either the literal "dev" or a valid semantic version."""
         for plugin in plugins:
             version = plugin["version"]
-            assert self.SEMVER_PATTERN.match(version), f"Invalid semver: {version}"
+            assert version == "dev" or self.SEMVER_PATTERN.match(version), f"Invalid version: {version}"
+
+    def test_release_entries_have_semver(self, plugins):
+        """Every non-dev entry must carry a semver version (the tag-commit manifest
+        version or the cleaned tag name fallback — never "dev")."""
+        for plugin in plugins:
+            if plugin["version"] != "dev":
+                assert self.SEMVER_PATTERN.match(plugin["version"]), f"Release entry not semver: {plugin['name']}@{plugin['version']}"
+
+    def test_dev_entries_are_never_verified(self, plugins):
+        """Dev-channel entries are always verified=false: the dev channel tracks the
+        unstable default-branch HEAD, so it stays install-blocked in default-deny
+        until a maintainer reviews it — even for curated plugins whose release entry
+        is verified=true."""
+        for plugin in plugins:
+            if plugin["version"] == "dev":
+                assert plugin.get("verified") is False, f"Dev entry must be verified=false: {plugin['name']}"
 
 
 class TestPluginType:
@@ -461,6 +487,50 @@ class TestSchemaValidation:
         }
         # Should not raise
         jsonschema.validate(catalog, schema_json)
+
+    def test_schema_accepts_dev_version(self, schema_json):
+        """Schema must accept the literal "dev" version (dev-channel entry)."""
+        import jsonschema
+        dev_plugin = {
+            "name": "phlix-plugin-valid",
+            "title": "Valid Plugin",
+            "type": "metadata-provider",
+            "repo": "https://github.com/detain/phlix-plugin-valid",
+            "ref": "a" * 40,
+            "artifactSha256": "b" * 64,
+            "version": "dev"
+        }
+        catalog = {"schemaVersion": 2, "name": "Test Catalog", "plugins": [dev_plugin]}
+        jsonschema.validate(catalog, schema_json)
+
+    def test_schema_rejects_dev_variants(self, schema_json):
+        """Schema must reject dev variants ("Dev", "DEV", "dev-1.0") — "dev" is
+        lowercase-exact only — and a missing version."""
+        import jsonschema
+        for bad_version in ["Dev", "DEV", "dev-1.0", "dev.1"]:
+            plugin = {
+                "name": "phlix-plugin-invalid",
+                "title": "Invalid Plugin",
+                "type": "metadata-provider",
+                "repo": "https://github.com/detain/phlix-plugin-invalid",
+                "ref": "a" * 40,
+                "artifactSha256": "b" * 64,
+                "version": bad_version
+            }
+            catalog = {"schemaVersion": 2, "name": "Test Catalog", "plugins": [plugin]}
+            with pytest.raises(jsonschema.ValidationError):
+                jsonschema.validate(catalog, schema_json)
+        plugin = {
+            "name": "phlix-plugin-invalid",
+            "title": "Invalid Plugin",
+            "type": "metadata-provider",
+            "repo": "https://github.com/detain/phlix-plugin-invalid",
+            "ref": "a" * 40,
+            "artifactSha256": "b" * 64
+        }
+        catalog = {"schemaVersion": 2, "name": "Test Catalog", "plugins": [plugin]}
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(catalog, schema_json)
 
     def test_schema_rejects_invalid_plugin_type(self, schema_json):
         """Schema should reject plugins with invalid type."""

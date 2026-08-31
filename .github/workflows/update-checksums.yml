@@ -47,21 +47,33 @@ jobs:
 
           // Phlix plugin catalog updater. Phases:
           //   A. Discover candidate plugin repos (GitHub topic search, org:detain)
-          //   B. Per-repo fetch: default branch -> head sha -> tarball -> sha256 -> plugin.json
-          //   C. Merge into the catalog: update drifted checksums, auto-add new
-          //      plugins (manifest-validated), then write the catalog back into the
-          //      checkout (GITHUB_WORKSPACE/plugins.json).
+          //   B. Per-repo fetch: default branch + topics -> head sha -> dev tarball +
+          //      manifest; git tags -> latest semver tag -> tagged tarball + manifest
+          //   C. Merge into the catalog. Each plugin repo contributes up to TWO entries
+          //      that share the plugin name and are distinguished by version:
+          //        - release entry: pinned to the latest semver git tag; version is the
+          //          semver read from plugin.json at the tag commit (fallback: cleaned
+          //          tag name for old tags whose manifests predate the version field)
+          //        - dev entry: pinned to default-branch HEAD; version literal "dev"
+          //      Tags sync: per-plugin tags = union(repo topics minus the family
+          //      denylist, curated tags already in the catalog), applied to both entries.
           //
           // Robustness contract: one malformed repo must never kill the job — every
           // per-repo failure prints "SKIP <name>: reason" and continues with the next
-          // repo. The script exits 1 only for discovery failure, an unparseable
-          // catalog, or a JSON encode failure.
+          // repo. The script exits 1 only for: discovery failure, an unparseable
+          // catalog, a JSON encode failure, a catalog write failure, or a run where
+          // every discovered repo was skipped/failed. Entries are never removed except
+          // stale release entries (same name as a plugin with tags, version != "dev" &&
+          // != latest tag version); entries of plugins absent from discovery are never
+          // touched.
 
           const PLUGIN_NAME_RE = '/^phlix-plugin-[a-z0-9][a-z0-9-]*$/';
           const SAFE_BRANCH_RE = '/^[A-Za-z0-9][A-Za-z0-9._\/-]*$/';
+          const SAFE_TAG_RE = '/^[A-Za-z0-9._\/-]+$/';
           const SHA40_RE = '/^[0-9a-f]{40}$/';
           const SHA64_RE = '/^[0-9a-f]{64}$/';
           const SEMVER_RE = '/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/';
+          const DEV_VERSION = 'dev';
           const CATALOG_TYPES = [
               'metadata-provider',
               'scrobbler',
@@ -89,6 +101,21 @@ jobs:
               return envOr('PHLIX_SKIP_FETCH', '') !== '';
           }
 
+          function phaseBOnly(): bool
+          {
+              // Local verification aid: run Phase B, write state files, exit before
+              // merging (lets Phase C be run repeatedly against the same state).
+              return envOr('PHLIX_PHASE_B_ONLY', '') !== '';
+          }
+
+          function writeStateFile(string $path, string $contents): void
+          {
+              if (file_put_contents($path, $contents) === false) {
+                  fwrite(STDERR, 'ERROR: could not write state file ' . $path . "\n");
+                  exit(1);
+              }
+          }
+
           function readManifest(string $path): ?array
           {
               if (!is_file($path)) {
@@ -102,11 +129,24 @@ jobs:
               }
           }
 
+          function readTopicsFixture(string $path): array
+          {
+              if (!is_file($path)) {
+                  return [];
+              }
+              try {
+                  $decoded = json_decode((string) file_get_contents($path), true, 512, JSON_THROW_ON_ERROR);
+                  return is_array($decoded) ? array_values(array_filter($decoded, 'is_string')) : [];
+              } catch (JsonException $e) {
+                  return [];
+              }
+          }
+
           function isGzipFile(string $path): bool
           {
               // Cheap magic-byte check: a real codeload tarball starts with the
-              // gzip header (0x1f 0x8b). Error bodies from the GitHub API never do,
-              // so this rejects 404/401/rate-limit responses before hashing.
+              // gzip header (0x1f 0x8b). Error bodies never do, so this rejects
+              // 404/401/rate-limit responses before hashing.
               $fh = fopen($path, 'rb');
               if ($fh === false) {
                   return false;
@@ -114,6 +154,184 @@ jobs:
               $magic = fread($fh, 2);
               fclose($fh);
               return $magic === "\x1f\x8b";
+          }
+
+          // ---------------------------------------------------------------------------
+          // Semver helpers (pure functions; unit-tested via php -r)
+          // ---------------------------------------------------------------------------
+
+          function cleanTagName(string $tagName): string
+          {
+              // Strip a single leading v/V (v1.2.3 -> 1.2.3); anything else is left as-is.
+              return preg_replace('/^[vV]/', '', $tagName) ?? $tagName;
+          }
+
+          function semverParts(string $version): ?array
+          {
+              // [major, minor, patch, prereleaseIdentifiers|null]; build metadata ignored.
+              if (!preg_match('/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/', $version, $m)) {
+                  return null;
+              }
+              $prerelease = isset($m[4]) && $m[4] !== '' ? explode('.', $m[4]) : null;
+              return [(int) $m[1], (int) $m[2], (int) $m[3], $prerelease];
+          }
+
+          function cmpPrereleaseIdentifiers(?array $a, ?array $b): int
+          {
+              // Semver precedence for prerelease identifier lists; null = release (no
+              // prerelease), which has HIGHER precedence than any prerelease.
+              if ($a === null && $b === null) return 0;
+              if ($a === null) return 1;
+              if ($b === null) return -1;
+              $count = max(count($a), count($b));
+              for ($i = 0; $i < $count; $i++) {
+                  $ia = $a[$i] ?? null;
+                  $ib = $b[$i] ?? null;
+                  if ($ia === null) return -1; // fewer identifiers = lower precedence
+                  if ($ib === null) return 1;
+                  if (ctype_digit($ia) && ctype_digit($ib)) {
+                      $d = (int) $ia <=> (int) $ib;
+                  } elseif (ctype_digit($ia)) {
+                      $d = -1; // numeric identifiers have lower precedence than alphanumeric
+                  } elseif (ctype_digit($ib)) {
+                      $d = 1;
+                  } else {
+                      $d = strcmp($ia, $ib); // ASCII lexical order
+                  }
+                  if ($d !== 0) return $d;
+              }
+              return 0;
+          }
+
+          function cmpSemverPrecedence(string $a, string $b): int
+          {
+              $pa = semverParts($a);
+              $pb = semverParts($b);
+              if ($pa === null || $pb === null) return 0;
+              for ($i = 0; $i < 3; $i++) {
+                  $d = $pa[$i] <=> $pb[$i];
+                  if ($d !== 0) return $d;
+              }
+              return cmpPrereleaseIdentifiers($pa[3], $pb[3]);
+          }
+
+          // Tags TSV output -> [['name','sha','version'], ...] sorted by semver DESC
+          // (highest version first; equal versions tie-broken by tag name desc for determinism).
+          // Non-semver tags (e.g. "stable") and malformed lines are ignored; every name
+          // and sha is gated before it can reach any URL.
+          function parseTagsSorted(string $tsvOutput): array
+          {
+              $tags = [];
+              foreach (explode("\n", trim($tsvOutput)) as $line) {
+                  if ($line === '') continue;
+                  $parts = explode("\t", $line);
+                  if (count($parts) !== 2) continue;
+                  $tname = trim($parts[0]);
+                  $tsha = trim($parts[1]);
+                  if (!preg_match(SAFE_TAG_RE, $tname) || !preg_match(SHA40_RE, $tsha)) continue;
+                  $tversion = cleanTagName($tname);
+                  if (semverParts($tversion) === null) continue;
+                  $tags[] = ['name' => $tname, 'sha' => $tsha, 'version' => $tversion];
+              }
+              usort($tags, static function (array $a, array $b): int {
+                  $d = cmpSemverPrecedence($b['version'], $a['version']);
+                  return $d !== 0 ? $d : strcmp($b['name'], $a['name']);
+              });
+              return $tags;
+          }
+
+          // ---------------------------------------------------------------------------
+          // Phase B target fetch (live mode): codeload archive at $sha — the SAME
+          // artifact form the server downloads (github.com/<owner>/<repo>/archive/<ref>.tar.gz,
+          // per the schema) and validate-catalog.yml hashes. The api.github.com tarball
+          // endpoint produces DIFFERENT bytes for the same commit. -f makes HTTP errors
+          // fail instead of saving an error body; the gzip-magic check below remains the
+          // backstop. Returns ['sha256' => string, 'manifest' => ?array] or null.
+          // ---------------------------------------------------------------------------
+          function fetchTargetTarball(string $name, string $sha, string $dir, string $suffix): ?array
+          {
+              $tarball = $dir . '/phlix_plugin_' . $name . $suffix . '.tar.gz';
+              shell_exec('curl -fsSL "https://github.com/detain/' . $name . '/archive/' . $sha . '.tar.gz" -o ' . $tarball . ' 2>&1');
+              if (!is_file($tarball) || filesize($tarball) <= 0) {
+                  return null;
+              }
+              if (!isGzipFile($tarball)) {
+                  return null;
+              }
+              $computed = trim((string) shell_exec('sha256sum ' . $tarball . ' | awk \'{print $1}\''));
+              if (!preg_match(SHA64_RE, $computed)) {
+                  return null;
+              }
+              $extract = $dir . '/phlix_extract_' . $name . $suffix;
+              shell_exec('rm -rf ' . $extract . ' && mkdir -p ' . $extract . ' && tar -xzf ' . $tarball . ' -C ' . $extract . ' --strip-components=1 2>&1');
+              return ['sha256' => $computed, 'manifest' => readManifest($extract . '/plugin.json')];
+          }
+
+          // ---------------------------------------------------------------------------
+          // Phase C helpers
+          // ---------------------------------------------------------------------------
+
+          function deriveTitle(string $name): string
+          {
+              return ucwords(str_replace('-', ' ', substr($name, strlen('phlix-plugin-'))));
+          }
+
+          function normalizeTags(array $tags): array
+          {
+              // Deterministic order for stable diffs: case-insensitive sort, tie-break
+              // case-sensitive; dedupe case-insensitively, keeping the first occurrence.
+              $unique = [];
+              foreach ($tags as $tag) {
+                  if (!is_string($tag) || $tag === '') continue;
+                  $unique[strtolower($tag)] = $tag;
+              }
+              $list = array_values($unique);
+              usort($list, static function (string $a, string $b): int {
+                  $d = strcasecmp($a, $b);
+                  return $d !== 0 ? $d : strcmp($a, $b);
+              });
+              return $list;
+          }
+
+          function computeSyncedTags(array $topics, array $curatedTags, array $denylist): array
+          {
+              $out = [];
+              foreach ($topics as $topic) {
+                  if (is_string($topic) && !isset($denylist[$topic])) {
+                      $out[$topic] = true;
+                  }
+              }
+              foreach (array_keys($curatedTags) as $tag) {
+                  $out[$tag] = true;
+              }
+              return normalizeTags(array_keys($out));
+          }
+
+          function carryVerified(array $entriesWithName): bool
+          {
+              // Prefer the OLD release entry (non-dev) verified flag; fall back to any
+              // entry. Auto-added/unknown plugins default to false (default-deny).
+              foreach ($entriesWithName as $entry) {
+                  if (($entry['version'] ?? '') !== DEV_VERSION && ($entry['verified'] ?? false) === true) return true;
+              }
+              foreach ($entriesWithName as $entry) {
+                  if (($entry['verified'] ?? false) === true) return true;
+              }
+              return false;
+          }
+
+          function carryField(array $entriesWithName, string $field): ?string
+          {
+              // Curated text fields (summary/description) survive roll-forward the same
+              // way curated trust does; manifests carry no such fields, so without the carry
+              // a version bump would silently drop the curation.
+              foreach ($entriesWithName as $entry) {
+                  if (($entry['version'] ?? '') !== DEV_VERSION && isset($entry[$field]) && is_string($entry[$field])) return $entry[$field];
+              }
+              foreach ($entriesWithName as $entry) {
+                  if (isset($entry[$field]) && is_string($entry[$field])) return $entry[$field];
+              }
+              return null;
           }
 
           // ---------------------------------------------------------------------------
@@ -132,7 +350,8 @@ jobs:
           echo 'Discovered ' . count($repos) . " candidate repo(s)\n";
 
           // ---------------------------------------------------------------------------
-          // Phase B: per-repo fetch -> pinned ref, tarball sha256, plugin manifest
+          // Phase B: per-repo fetch -> dev trio (HEAD) + tagged trio (latest semver tag)
+          // + topics; state files written to stateDir() (fixture mode reads the same layout)
           // ---------------------------------------------------------------------------
           $state = [];
           foreach ($repos as $name) {
@@ -144,36 +363,68 @@ jobs:
               if (skipFetch()) {
                   // Local simulation mode: read pre-made fixture files instead of
                   // shelling out to gh/curl. Fixtures replicate Phase B output:
-                  //   <stateDir>/ref_<name>.txt     40-hex head sha
-                  //   <stateDir>/sha256_<name>.txt  64-hex tarball digest
-                  //   <stateDir>/manifest_<name>.json  optional plugin.json
+                  //   <stateDir>/ref_<name>.txt            dev: 40-hex HEAD sha
+                  //   <stateDir>/sha256_<name>.txt         dev: 64-hex HEAD tarball digest
+                  //   <stateDir>/manifest_<name>.json      dev: optional plugin.json
+                  //   <stateDir>/tagged_ref_<name>.txt     release: 40-hex tag sha (absent = no tags)
+                  //   <stateDir>/tagged_sha256_<name>.txt  release: 64-hex tag tarball digest
+                  //   <stateDir>/tagged_manifest_<name>.json release: optional plugin.json at tag commit
+                  //   <stateDir>/topics_<name>.json        JSON array of repo topics
                   $dir = stateDir();
-                  $ref = trim((string) file_get_contents($dir . '/ref_' . $name . '.txt'));
-                  $sha256 = trim((string) file_get_contents($dir . '/sha256_' . $name . '.txt'));
+                  $refFile = $dir . '/ref_' . $name . '.txt';
+                  $shaFile = $dir . '/sha256_' . $name . '.txt';
+                  $ref = is_file($refFile) ? trim((string) file_get_contents($refFile)) : '';
+                  $sha256 = is_file($shaFile) ? trim((string) file_get_contents($shaFile)) : '';
                   if (!preg_match(SHA40_RE, $ref) || !preg_match(SHA64_RE, $sha256)) {
                       echo 'SKIP ' . $name . ': no fixture state files in ' . $dir . "\n";
                       continue;
                   }
-                  $state[$name] = [
+                  $stateEntry = [
                       'ref' => $ref,
                       'sha256' => $sha256,
                       'manifest' => readManifest($dir . '/manifest_' . $name . '.json'),
+                      'tagged' => null,
+                      'topics' => readTopicsFixture($dir . '/topics_' . $name . '.json'),
                   ];
+                  $taggedRefFile = $dir . '/tagged_ref_' . $name . '.txt';
+                  $taggedRef = is_file($taggedRefFile) ? trim((string) file_get_contents($taggedRefFile)) : '';
+                  if (preg_match(SHA40_RE, $taggedRef)) {
+                      $taggedShaFile = $dir . '/tagged_sha256_' . $name . '.txt';
+                      $taggedSha256 = is_file($taggedShaFile) ? trim((string) file_get_contents($taggedShaFile)) : '';
+                      if (preg_match(SHA64_RE, $taggedSha256)) {
+                          $taggedNameFile = $dir . '/tagged_name_' . $name . '.txt';
+                          $stateEntry['tagged'] = [
+                              'name' => is_file($taggedNameFile) ? trim((string) file_get_contents($taggedNameFile)) : 'unknown-tag',
+                              'sha' => $taggedRef,
+                              'version' => '0.0.0-fixture', // fallback version; Phase C prefers tagged manifest version
+                              'sha256' => $taggedSha256,
+                              'manifest' => readManifest($dir . '/tagged_manifest_' . $name . '.json'),
+                          ];
+                      }
+                  }
+                  $state[$name] = $stateEntry;
                   continue;
               }
 
-              // The name gate above runs BEFORE $name is interpolated into any shell
-              // command below — the regex permits only [a-z0-9-], so injection is
-              // impossible by construction.
-              $branch = trim((string) shell_exec('gh api repos/detain/' . $name . ' --jq \'.default_branch\' 2>&1'));
-              if ($branch === '') {
-                  $branch = 'master';
+              // repo metadata (default branch + topics) — one gh call, parsed explicitly in
+              // PHP (fail fast, never shell-mangle JSON); individual repo meta failures SKIP
+              // the repo only (stale entries for it are left untouched).
+              $metaJson = trim((string) shell_exec('gh api repos/detain/' . $name . ' --jq \'{default_branch: .default_branch, topics: .topics}\' 2>&1'));
+              $meta = json_decode($metaJson, true);
+              if (!is_array($meta) || !isset($meta['default_branch']) || !is_string($meta['default_branch'])) {
+                  echo 'SKIP ' . $name . ': repo metadata fetch failed: ' . trim($metaJson) . "\n";
+                  continue;
               }
-              // Branch names legally allow ; $ ` & | quotes and parens — a hostile
-              // default branch must never reach a shell string. Gate before use.
+              $branch = $meta['default_branch'] === '' ? 'master' : $meta['default_branch'];
+              // Branch names legally allow ; $ ` & | quotes and parens — a hostile default
+              // branch must never reach a shell string. Gate before use.
               if (!preg_match(SAFE_BRANCH_RE, $branch)) {
                   echo 'SKIP ' . $name . ": unsafe branch name '" . $branch . "'\n";
                   continue;
+              }
+              $topics = [];
+              if (isset($meta['topics']) && is_array($meta['topics'])) {
+                  $topics = array_values(array_filter($meta['topics'], 'is_string'));
               }
 
               $sha = trim((string) shell_exec('gh api repos/detain/' . $name . '/commits/' . $branch . ' --jq \'.sha\' 2>&1'));
@@ -183,46 +434,61 @@ jobs:
               }
 
               $dir = stateDir();
-              $tarball = $dir . '/phlix_plugin_' . $name . '.tar.gz';
-              // Codeload archive URL — the SAME artifact form the server downloads
-              // (github.com/<owner>/<repo>/archive/<ref>.tar.gz, per the schema) and
-              // that validate-catalog.yml hashes. The api.github.com tarball endpoint
-              // produces DIFFERENT bytes for the same commit, which would corrupt
-              // every artifactSha256. -f makes HTTP errors fail instead of saving an
-              // error body (the gzip-magic check below remains the backstop).
-              shell_exec('curl -fsSL "https://github.com/detain/' . $name . '/archive/' . $sha . '.tar.gz" -o ' . $tarball . ' 2>&1');
-              if (!is_file($tarball) || filesize($tarball) <= 0) {
-                  echo 'SKIP ' . $name . ": tarball download failed or empty\n";
+              $dev = fetchTargetTarball($name, $sha, $dir, '');
+              if ($dev === null) {
+                  echo 'SKIP ' . $name . ": dev tarball fetch failed at HEAD '" . substr($sha, 0, 12) . "'\n";
                   continue;
               }
-              if (!isGzipFile($tarball)) {
-                  // curl -sL without -f would happily save a JSON error body (404/401/rate-limit)
-                  // — never let it reach sha256sum, or an existing entry's pin gets corrupted.
-                  echo 'SKIP ' . $name . ": tarball download failed (not a gzip archive)\n";
-                  continue;
-              }
-
-              $computed = trim((string) shell_exec('sha256sum ' . $tarball . ' | awk \'{print $1}\''));
-              if (!preg_match(SHA64_RE, $computed)) {
-                  echo 'SKIP ' . $name . ": invalid sha256 '" . $computed . "'\n";
-                  continue;
-              }
-
-              $extract = $dir . '/phlix_extract_' . $name;
-              shell_exec('rm -rf ' . $extract . ' && mkdir -p ' . $extract . ' && tar -xzf ' . $tarball . ' -C ' . $extract . ' --strip-components=1 2>&1');
-
-              $state[$name] = [
+              $stateEntry = [
                   'ref' => $sha,
-                  'sha256' => $computed,
-                  'manifest' => readManifest($extract . '/plugin.json'),
+                  'sha256' => $dev['sha256'],
+                  'manifest' => $dev['manifest'],
+                  'tagged' => null,
+                  'topics' => $topics,
               ];
+
+              // tags (optional; a failed tags call degrades to dev-only — never fatal)
+              $tagsJson = trim((string) shell_exec('gh api repos/detain/' . $name . '/tags --jq \'.[] | [.name, .commit.sha] | @tsv\' 2>&1'));
+              $tags = parseTagsSorted($tagsJson);
+              if (count($tags) > 0) {
+                  $latest = $tags[0];
+                  $release = fetchTargetTarball($name, $latest['sha'], $dir, '_tagged');
+                  if ($release === null) {
+                      echo 'SKIP ' . $name . ": release tarball fetch failed at tag '" . $latest['name'] . "' — keeping dev entry only\n";
+                  } else {
+                      $stateEntry['tagged'] = [
+                          'name' => $latest['name'],
+                          'sha' => $latest['sha'],
+                          'version' => $latest['version'],
+                          'sha256' => $release['sha256'],
+                          'manifest' => $release['manifest'],
+                      ];
+                  }
+              }
+
+              // write state files (same layout fixture mode reads; sim and live share Phase C)
+              writeStateFile($dir . '/ref_' . $name . '.txt', $sha . "\n");
+              writeStateFile($dir . '/sha256_' . $name . '.txt', $dev['sha256'] . "\n");
+              writeStateFile($dir . '/manifest_' . $name . '.json', $dev['manifest'] !== null ? json_encode($dev['manifest'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n" : '');
+              writeStateFile($dir . '/topics_' . $name . '.json', json_encode($topics) . "\n");
+              if ($stateEntry['tagged'] !== null) {
+                  $tagged = $stateEntry['tagged'];
+                  writeStateFile($dir . '/tagged_name_' . $name . '.txt', $tagged['name'] . "\n");
+                  writeStateFile($dir . '/tagged_ref_' . $name . '.txt', $tagged['sha'] . "\n");
+                  writeStateFile($dir . '/tagged_sha256_' . $name . '.txt', $tagged['sha256'] . "\n");
+                  writeStateFile($dir . '/tagged_manifest_' . $name . '.json', $tagged['manifest'] !== null ? json_encode($tagged['manifest'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n" : '');
+              }
+              $state[$name] = $stateEntry;
           }
 
-          // Every repo skipped/failed (e.g. gh auth died after discovery) — fail loudly
-          // instead of reporting a silent successful no-op merge back to the push step.
           if (count($state) === 0) {
               fwrite(STDERR, "ERROR: all discovered repos were skipped or failed — nothing to merge (auth/network problem?)\n");
               exit(1);
+          }
+
+          if (phaseBOnly()) {
+              echo 'PHASE B COMPLETE: state written for ' . count($state) . ' repo(s) to ' . stateDir() . "\n";
+              exit(0);
           }
 
           // ---------------------------------------------------------------------------
@@ -240,62 +506,49 @@ jobs:
               exit(1);
           }
 
-          $existing = [];
-          foreach ($plugins['plugins'] as $entry) {
-              if (is_array($entry) && isset($entry['name']) && is_string($entry['name'])) {
-                  $existing[$entry['name']] = true;
+          // Stable index: entries are mutated in place or appended; the list is rebuilt
+          // only at the very end (removals), so indexes stay valid for the whole merge.
+          $byKey = [];
+          foreach ($plugins['plugins'] as $i => $entry) {
+              if (is_array($entry) && isset($entry['name'], $entry['version']) && is_string($entry['name']) && is_string($entry['version'])) {
+                  $byKey[$entry['name'] . "\x00" . $entry['version']] = $i;
               }
           }
 
+          // Family topic denylist: a topic shared by strictly more than half of the
+          // repos is a family convention (media-server, self-hosted, php, ...), not a
+          // per-plugin descriptor; it is filtered out of the per-plugin tags. Exactly
+          // 50% is NOT denylisted.
+          $topicCounts = [];
+          foreach ($state as $st) {
+              foreach (($st['topics'] ?? []) as $topic) {
+                  $topicCounts[$topic] = ($topicCounts[$topic] ?? 0) + 1;
+              }
+          }
+          $repoCount = count($state);
+          $denylist = [];
+          foreach ($topicCounts as $topic => $count) {
+              if ($count * 2 > $repoCount) {
+                  $denylist[$topic] = true;
+              }
+          }
+          if (count($denylist) > 0) {
+              echo 'denylist (' . count($denylist) . ' family topics across ' . $repoCount . ' repos, ' . count($topicCounts) . " distinct): " . implode(', ', array_keys($denylist)) . "\n";
+          }
+
+          $removeIndexes = [];
           $changed = false;
           $changedPlugins = [];
           $updated = [];
 
-          // UPDATE existing entries whose tarball sha256 drifted from the stored pin.
-          // ref and artifactSha256 MUST move in lockstep (the server verifies the
-          // tarball of the pinned ref against artifactSha256) — so both are written
-          // and both are reported when they drift.
-          foreach ($plugins['plugins'] as &$entry) {
-              $name = isset($entry['name']) && is_string($entry['name']) ? $entry['name'] : '';
-              if ($name === '' || !isset($state[$name]['sha256'])) {
-                  continue;
-              }
-              $stored = isset($entry['artifactSha256']) ? $entry['artifactSha256'] : '';
-              $computed = $state[$name]['sha256'];
-              if ($computed !== $stored) {
-                  $line = 'Plugin ' . $name . ': ' . substr($stored, 0, 16) . '... -> ' . substr($computed, 0, 16) . '...';
-                  $entry['artifactSha256'] = $computed;
-                  $storedRef = isset($entry['ref']) && is_string($entry['ref']) ? $entry['ref'] : '';
-                  if ($storedRef !== $state[$name]['ref']) {
-                      $entry['ref'] = $state[$name]['ref'];
-                      $line .= ' (ref ' . substr($storedRef, 0, 12) . '... -> ' . substr($state[$name]['ref'], 0, 12) . '...)';
-                  }
-                  echo $line . "\n";
-                  $changed = true;
-                  $changedPlugins[] = $name;
-                  $updated[] = $name . ': ' . substr($computed, 0, 16);
-              }
-          }
-          unset($entry);
-
-          // ADD discovered repos not yet in the catalog — but only genuine plugins
-          // with a valid plugin.json manifest at the pinned ref. Auto-added entries
-          // are marked verified=false on purpose: the server install-blocks them in
-          // default-deny mode until a human reviews and verifies them.
           foreach ($state as $name => $st) {
-              if (isset($existing[$name])) {
-                  continue;
-              }
-              if (!is_array($st['manifest'])) {
+              $manifest = $st['manifest'];
+              if (!is_array($manifest)) {
                   echo 'SKIP ' . $name . ": not a plugin (no valid plugin.json manifest)\n";
                   continue;
               }
-              $manifest = $st['manifest'];
-
               $manifestName = isset($manifest['name']) && is_string($manifest['name']) ? $manifest['name'] : $name;
               if ($manifestName !== $name) {
-                  // Catalog entries must have name and repo agree (the repo URL is
-                  // derived from the repo name); a mismatch means a renamed/forked repo.
                   echo 'SKIP ' . $name . ": manifest name '" . $manifestName . "' does not match repo name\n";
                   continue;
               }
@@ -303,57 +556,243 @@ jobs:
                   echo 'SKIP ' . $name . ": manifest name '" . $manifestName . "' is not a valid plugin name\n";
                   continue;
               }
-
               $type = isset($manifest['type']) && is_string($manifest['type']) ? $manifest['type'] : '';
               if (!in_array($type, CATALOG_TYPES, true)) {
                   echo 'SKIP ' . $name . ": manifest type '" . $type . "' not representable in catalog enum\n";
                   continue;
               }
 
-              $version = isset($manifest['version']) && is_string($manifest['version']) ? $manifest['version'] : '';
-              if (!preg_match(SEMVER_RE, $version)) {
-                  echo 'SKIP ' . $name . ": manifest version '" . $version . "' is not valid semver\n";
-                  continue;
+              // synced tags: repo topics minus the family denylist, union the curated
+              // tags already present on any of this plugin's catalog entries.
+              $curatedTags = [];
+              foreach ($plugins['plugins'] as $entry) {
+                  if (($entry['name'] ?? '') === $name && isset($entry['tags']) && is_array($entry['tags'])) {
+                      foreach ($entry['tags'] as $tag) {
+                          if (is_string($tag) && $tag !== '') $curatedTags[$tag] = true;
+                      }
+                  }
+              }
+              $syncedTags = computeSyncedTags($st['topics'] ?? [], $curatedTags, $denylist);
+
+              $tagsChanged = false;
+              $oldTagsCount = 0;
+              foreach ($plugins['plugins'] as $i => $entry) {
+                  if (($entry['name'] ?? '') !== $name) continue;
+                  $oldTags = isset($entry['tags']) && is_array($entry['tags']) ? $entry['tags'] : [];
+                  if ($oldTagsCount === 0) $oldTagsCount = count(normalizeTags($oldTags));
+                  if (normalizeTags($oldTags) !== $syncedTags) {
+                      $tagsChanged = true;
+                      // Apply synced tags to EVERY existing entry of this plugin (a plugin
+                      // without tags has no release write-path this run, yet its entries must
+                      // still converge — otherwise the log would churn without a write and
+                      // run #2 would never reach "No checksums changed").
+                      $plugins['plugins'][$i]['tags'] = $syncedTags;
+                  }
+              }
+              if ($tagsChanged) {
+                  echo 'tags ' . $name . ': ' . $oldTagsCount . ' -> ' . count($syncedTags) . " (topics sync)\n";
+                  $changed = true;
+                  $changedPlugins[] = $name;
               }
 
-              $minServerVersion = isset($manifest['phlix_min_server_version']) && is_string($manifest['phlix_min_server_version'])
+              // ---- RELEASE entry (only when the repo has git tags this run) ----
+              if ($st['tagged'] !== null) {
+                  $tagged = $st['tagged'];
+                  $tagVersion = null;
+                  if (is_array($tagged['manifest']) && isset($tagged['manifest']['version']) && is_string($tagged['manifest']['version']) && preg_match(SEMVER_RE, $tagged['manifest']['version'])) {
+                      $tagVersion = $tagged['manifest']['version']; // manifest version at the tag commit is authoritative
+                  } elseif (preg_match(SEMVER_RE, $tagged['version'])) {
+                      $tagVersion = $tagged['version']; // graceful fallback: cleaned tag name (old tags predate the version field)
+                  }
+                  if ($tagVersion === null) {
+                      echo 'SKIP ' . $name . ": release entry skipped — tag '" . $tagged['name'] . "' carries no semver version (manifest version missing/invalid at the tag commit; cleaned tag name not semver)\n";
+                  } else {
+                      $releaseType = (is_array($tagged['manifest']) && isset($tagged['manifest']['type']) && is_string($tagged['manifest']['type']) && in_array($tagged['manifest']['type'], CATALOG_TYPES, true))
+                          ? $tagged['manifest']['type']
+                          : $type;
+                      $releaseMinServer = (is_array($tagged['manifest']) && isset($tagged['manifest']['phlix_min_server_version']) && is_string($tagged['manifest']['phlix_min_server_version']) && preg_match(SEMVER_RE, $tagged['manifest']['phlix_min_server_version']))
+                          ? $tagged['manifest']['phlix_min_server_version']
+                          : null;
+                      $releaseKey = $name . "\x00" . $tagVersion;
+                      $existingIndex = $byKey[$releaseKey] ?? null;
+                      $oldVersion = null;
+
+                      if ($existingIndex !== null && is_array($plugins['plugins'][$existingIndex])) {
+                          // In-place upsert: (name, version) already in the catalog —
+                          // refresh the pin and metadata; verified/summary/description
+                          // (curated fields) stay untouched. Log/change ONLY if the entry
+                          // actually differs (idempotency: a second run must be a no-op).
+                          $oldEntry = $plugins['plugins'][$existingIndex];
+                          $entry = $oldEntry;
+                          $entry['ref'] = $tagged['sha'];
+                          $entry['artifactSha256'] = $tagged['sha256'];
+                          $entry['type'] = $releaseType;
+                          $entry['title'] = deriveTitle($name);
+                          $entry['repo'] = 'https://github.com/detain/' . $name;
+                          $entry['tags'] = $syncedTags;
+                          if ($entry !== $oldEntry) {
+                              $oldSha = isset($oldEntry['artifactSha256']) && is_string($oldEntry['artifactSha256']) ? $oldEntry['artifactSha256'] : '';
+                              $oldRef = isset($oldEntry['ref']) && is_string($oldEntry['ref']) ? $oldEntry['ref'] : '';
+                              $line = 'Plugin ' . $name . ': ' . substr($oldSha, 0, 16) . '... -> ' . substr($tagged['sha256'], 0, 16) . '...';
+                              if ($oldRef !== $tagged['sha']) {
+                                  $line .= ' (ref ' . substr($oldRef, 0, 12) . '... -> ' . substr($tagged['sha'], 0, 12) . '...)';
+                              }
+                              echo $line . "\n";
+                              $plugins['plugins'][$existingIndex] = $entry;
+                              $changed = true;
+                              $changedPlugins[] = $name;
+                              $updated[] = $name . ': ' . substr($tagged['sha256'], 0, 16);
+                          }
+                      } else {
+                          // New release entry (first tag, or roll-forward to a newer tag).
+                          // The OLD release entry (different version) is removed below;
+                          // curated trust and curated text carry over so a version bump
+                          // never resets verification.
+                          $oldEntries = [];
+                          foreach ($plugins['plugins'] as $entry) {
+                              if (($entry['name'] ?? '') === $name) $oldEntries[] = $entry;
+                          }
+                          foreach ($oldEntries as $oldEntry) {
+                              if (($oldEntry['version'] ?? '') !== DEV_VERSION) { $oldVersion = $oldEntry['version']; break; }
+                          }
+                          $carriedVerified = carryVerified($oldEntries);
+                          $entry = [
+                              'name' => $name,
+                              'title' => deriveTitle($name),
+                              'type' => $releaseType,
+                              'repo' => 'https://github.com/detain/' . $name,
+                              'ref' => $tagged['sha'],
+                              'artifactSha256' => $tagged['sha256'],
+                              'version' => $tagVersion,
+                          ];
+                          if ($releaseMinServer !== null) $entry['minServerVersion'] = $releaseMinServer;
+                          $entry['verified'] = $carriedVerified;
+                          $entry['deprecated'] = false;
+                          $entry['yanked'] = false;
+                          $entry['author'] = 'detain';
+                          $entry['tags'] = $syncedTags;
+                          $carriedSummary = carryField($oldEntries, 'summary');
+                          $carriedDescription = carryField($oldEntries, 'description');
+                          if ($carriedSummary !== null) $entry['summary'] = $carriedSummary;
+                          if ($carriedDescription !== null) $entry['description'] = $carriedDescription;
+
+                          $plugins['plugins'][] = $entry;
+                          $byKey[$releaseKey] = count($plugins['plugins']) - 1;
+                          if ($oldVersion !== null && $oldVersion !== $tagVersion) {
+                              echo 'Plugin ' . $name . ': release version ' . $oldVersion . ' -> ' . $tagVersion . " (tag '" . $tagged['name'] . "', verified carry=" . ($carriedVerified ? 'true' : 'false') . ")\n";
+                              $updated[] = $name . ': ' . $oldVersion . ' -> ' . $tagVersion;
+                          } else {
+                              echo 'ADD ' . $name . '@' . substr($tagged['sha'], 0, 12) . ' (' . $releaseType . ', v' . $tagVersion . ")\n";
+                          }
+                          $changed = true;
+                          $changedPlugins[] = $name;
+                      }
+
+                      // Stale release cleanup (only with tags data and a known latest tag
+                      // version): drop entries with this name whose version is neither the
+                      // dev literal nor the latest tag version — roll-forward keeps exactly
+                      // one release entry per plugin.
+                      foreach ($plugins['plugins'] as $i => $entry) {
+                          if (($entry['name'] ?? '') !== $name) continue;
+                          $v = isset($entry['version']) ? $entry['version'] : '';
+                          if ($v !== DEV_VERSION && $v !== $tagVersion) {
+                              $removeIndexes[$i] = true;
+                              echo 'REMOVE ' . $name . '@' . $v . ' (stale release; latest tag version ' . $tagVersion . ")\n";
+                          }
+                      }
+                  }
+              }
+
+              // ---- DEV entry (always; pinned to HEAD, version literal "dev",
+              // verified=false ALWAYS — the dev channel is unstable by design) ----
+              $devKey = $name . "\x00" . DEV_VERSION;
+              $existingDevIndex = $byKey[$devKey] ?? null;
+              $devMinServer = (isset($manifest['phlix_min_server_version']) && is_string($manifest['phlix_min_server_version']) && preg_match(SEMVER_RE, $manifest['phlix_min_server_version']))
                   ? $manifest['phlix_min_server_version']
                   : null;
-              if ($minServerVersion !== null && !preg_match(SEMVER_RE, $minServerVersion)) {
-                  echo 'SKIP ' . $name . ": manifest phlix_min_server_version '" . $minServerVersion . "' is not valid semver\n";
-                  continue;
+              if ($existingDevIndex !== null && is_array($plugins['plugins'][$existingDevIndex])) {
+                  $oldDevEntry = $plugins['plugins'][$existingDevIndex];
+                  $entry = $oldDevEntry;
+                  $entry['ref'] = $st['ref'];
+                  $entry['artifactSha256'] = $st['sha256'];
+                  $entry['version'] = DEV_VERSION;
+                  $entry['type'] = $type;
+                  $entry['title'] = deriveTitle($name);
+                  $entry['repo'] = 'https://github.com/detain/' . $name;
+                  if ($devMinServer !== null) {
+                      $entry['minServerVersion'] = $devMinServer;
+                  } else {
+                      unset($entry['minServerVersion']);
+                  }
+                  $entry['verified'] = false;
+                  $entry['deprecated'] = false;
+                  $entry['yanked'] = false;
+                  $entry['author'] = 'detain';
+                  $entry['tags'] = $syncedTags;
+                  if ($entry !== $oldDevEntry) {
+                      $oldDevSha = isset($oldDevEntry['artifactSha256']) && is_string($oldDevEntry['artifactSha256']) ? $oldDevEntry['artifactSha256'] : '';
+                      $oldDevRef = isset($oldDevEntry['ref']) && is_string($oldDevEntry['ref']) ? $oldDevEntry['ref'] : '';
+                      $line = 'Plugin ' . $name . ' dev: ' . substr($oldDevSha, 0, 16) . '... -> ' . substr($st['sha256'], 0, 16) . '...';
+                      if ($oldDevRef !== $st['ref']) {
+                          $line .= ' (ref ' . substr($oldDevRef, 0, 12) . '... -> ' . substr($st['ref'], 0, 12) . '...)';
+                      }
+                      echo $line . "\n";
+                      $plugins['plugins'][$existingDevIndex] = $entry;
+                      $changed = true;
+                      $changedPlugins[] = $name;
+                      $updated[] = $name . ': ' . substr($st['sha256'], 0, 16);
+                  }
+              } else {
+                  $entry = [
+                      'name' => $name,
+                      'title' => deriveTitle($name),
+                      'type' => $type,
+                      'repo' => 'https://github.com/detain/' . $name,
+                      'ref' => $st['ref'],
+                      'artifactSha256' => $st['sha256'],
+                      'version' => DEV_VERSION,
+                  ];
+                  if ($devMinServer !== null) $entry['minServerVersion'] = $devMinServer;
+                  $entry['verified'] = false;
+                  $entry['deprecated'] = false;
+                  $entry['yanked'] = false;
+                  $entry['author'] = 'detain';
+                  $entry['tags'] = $syncedTags;
+                  $plugins['plugins'][] = $entry;
+                  $byKey[$devKey] = count($plugins['plugins']) - 1;
+                  echo 'ADD ' . $name . '@' . substr($st['ref'], 0, 12) . ' (dev-channel ' . $type . ")\n";
+                  $changed = true;
+                  $changedPlugins[] = $name;
+                  $updated[] = $name . ': ' . substr($st['sha256'], 0, 16);
               }
-
-              $entry = [
-                  'name' => $manifestName,
-                  'title' => ucwords(str_replace('-', ' ', substr($name, strlen('phlix-plugin-')))),
-                  'type' => $type,
-                  'repo' => 'https://github.com/detain/' . $name,
-                  'ref' => $st['ref'],
-                  'artifactSha256' => $st['sha256'],
-                  'version' => $version,
-              ];
-              if ($minServerVersion !== null) {
-                  $entry['minServerVersion'] = $minServerVersion;
-              }
-              $entry['verified'] = false;
-              $entry['deprecated'] = false;
-              $entry['yanked'] = false;
-              $entry['author'] = 'detain';
-
-              $plugins['plugins'][] = $entry;
-              $existing[$manifestName] = true;
-              $changed = true;
-              $changedPlugins[] = $manifestName;
-              echo 'ADD ' . $manifestName . '@' . substr($st['ref'], 0, 12) . ' (' . $type . ', v' . $version . ")\n";
           }
 
           // ---------------------------------------------------------------------------
-          // Write back: sort by name (validate-catalog.yml blocks on ordering), then
-          // persist into the CHECKOUT working copy — /tmp/plugins.json is only the
-          // pristine read source. Writing to the checkout is what makes the Push step
-          // able to stage anything (the latent bug this workflow fixes).
+          // Write back: apply removals, sort canonically (name asc, dev last within name,
+          // version tie-break — matching validate-catalog.yml's jq gate EXACTLY), then
+          // persist into the CHECKOUT working copy — /tmp/plugins.json is only the pristine
+          // read source. Write the file FIRST, then emit changed=true (the push step must
+          // never be told "changed" for a catalog that failed to persist).
           // ---------------------------------------------------------------------------
+          if (count($removeIndexes) > 0) {
+              $kept = [];
+              foreach ($plugins['plugins'] as $i => $entry) {
+                  if (!isset($removeIndexes[$i])) $kept[] = $entry;
+              }
+              $plugins['plugins'] = $kept;
+          }
+
+          usort($plugins['plugins'], static function (array $a, array $b): int {
+              $an = isset($a['name']) && is_string($a['name']) ? $a['name'] : '';
+              $bn = isset($b['name']) && is_string($b['name']) ? $b['name'] : '';
+              $cmp = strcmp($an, $bn);
+              if ($cmp !== 0) return $cmp;
+              $ad = (isset($a['version']) && $a['version'] === DEV_VERSION) ? 1 : 0;
+              $bd = (isset($b['version']) && $b['version'] === DEV_VERSION) ? 1 : 0;
+              if ($ad !== $bd) return $ad <=> $bd;
+              return strcmp(isset($a['version']) ? $a['version'] : '', isset($b['version']) ? $b['version'] : '');
+          });
+
           $outputFile = getenv('GITHUB_OUTPUT');
           $appendOutput = static function (string $line) use ($outputFile): void {
               if ($outputFile !== false && $outputFile !== '') {
@@ -362,27 +801,19 @@ jobs:
           };
 
           if ($changed) {
-              usort($plugins['plugins'], static function (array $a, array $b): int {
-                  $an = isset($a['name']) && is_string($a['name']) ? $a['name'] : '';
-                  $bn = isset($b['name']) && is_string($b['name']) ? $b['name'] : '';
-                  return strcmp($an, $bn);
-              });
-
               $pluginsPath = envOr('GITHUB_WORKSPACE', '.') . '/plugins.json';
               $json = json_encode($plugins, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
               if ($json === false) {
                   fwrite(STDERR, 'ERROR: could not encode catalog JSON: ' . json_last_error_msg() . "\n");
                   exit(1);
               }
-              // PHP's JSON_PRETTY_PRINT emits 4-space indent; the catalog is 2-space.
-              // Halve every line's leading run so the first write is not a full-file diff.
+              // PHP's JSON_PRETTY_PRINT emits 4-space indent; the catalog is 2-space. Halve
+              // every line's leading run so the first write is not a full-file diff.
               $json = preg_replace_callback(
                   '/^( +)/m',
                   static fn (array $m): string => str_repeat(' ', (int) (strlen($m[1]) / 2)),
                   $json
               ) ?? $json;
-              // Write the file FIRST, then emit changed=true — the push step must
-              // never be told "changed" for a catalog that failed to persist.
               $written = file_put_contents($pluginsPath, $json . "\n");
               if ($written === false) {
                   fwrite(STDERR, 'ERROR: could not write catalog to ' . $pluginsPath . "\n");
@@ -390,6 +821,7 @@ jobs:
               }
               echo 'wrote ' . $pluginsPath . "\n";
 
+              $changedPlugins = array_values(array_unique($changedPlugins));
               echo "changed=true\n";
               echo 'CHANGED_PLUGINS=' . implode(',', $changedPlugins) . "\n";
               echo 'UPDATED=' . implode(',', $updated) . "\n";
