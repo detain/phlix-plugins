@@ -84,13 +84,19 @@ jobs:
               'integration',
               'ui-theme',
           ];
-          // Owner-curated static tag floor (2026-08-31): topics that are never useful as
-          // descriptive plugin tags regardless of how rare they are (family noise,
-          // ecosystem-brand topics, build-tooling topics). Unlike the dynamic majority
-          // denylist, the static floor filters curated tags too.
+          // Owner-curated static tag floor (2026-08-31, widened after review for all phlix-*
+          // family variants): topics that are never useful as descriptive plugin tags
+          // regardless of how rare they are (family noise, ecosystem-brand topics,
+          // build-tooling topics). Unlike the dynamic majority denylist, the static
+          // floor filters curated tags too.
           const STATIC_TAG_DENY = [
               'phlix-plugins',
               'phlix-themes',
+              'phlix-theme',
+              'phlix-ui',
+              'phlix-plugin-theme',
+              'phlix-theming',
+              'phlix-ui-theme',
               'emby',
               'example',
               'jellyfin',
