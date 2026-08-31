@@ -77,7 +77,7 @@ moving branch.
 | `deprecationMessage` | no | Human-readable message shown for deprecated/yanked entries. |
 | `summary` / `description` | no | Short / long description. |
 | `author` | no | Catalog-declared author/owner. |
-| `tags` | no | Free-form tags. |
+| `tags` | no | Free-form tags; the sync job unions repo topics (minus a dynamic majority-family denylist **and** an owner-curated static floor such as `media-server`/`plex`/`composer-package`) with curated tags (minus the static floor only). |
 
 The official catalog is the trust root: any change to a `ref` is a reviewable
 git diff, so a malicious silent rewrite of an install target is visible in
