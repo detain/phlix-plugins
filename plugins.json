@@ -20,13 +20,8 @@
       "tags": [
         "anidb",
         "anime",
-        "composer-package",
-        "emby",
-        "jellyfin",
-        "media-server",
         "metadata",
-        "metadata-provider",
-        "plex"
+        "metadata-provider"
       ],
       "summary": "Anime metadata from AniDB.",
       "description": "AniDB metadata provider — anime titles, descriptions, episodes and ratings via the AniDB UDP API and daily title dump."
@@ -47,13 +42,8 @@
       "tags": [
         "anidb",
         "anime",
-        "composer-package",
-        "emby",
-        "jellyfin",
-        "media-server",
         "metadata",
-        "metadata-provider",
-        "plex"
+        "metadata-provider"
       ]
     },
     {
@@ -72,17 +62,12 @@
       "tags": [
         "anilist",
         "anime",
-        "composer-package",
-        "emby",
         "graphql",
-        "jellyfin",
         "library",
         "manga",
-        "media-server",
         "metadata",
         "metadata-provider",
         "otaku",
-        "plex",
         "tracking",
         "watchlist"
       ],
@@ -105,17 +90,12 @@
       "tags": [
         "anilist",
         "anime",
-        "composer-package",
-        "emby",
         "graphql",
-        "jellyfin",
         "library",
         "manga",
-        "media-server",
         "metadata",
         "metadata-provider",
         "otaku",
-        "plex",
         "tracking",
         "watchlist"
       ]
@@ -139,12 +119,8 @@
         "jade",
         "mit-license",
         "oceanic",
-        "phlix-plugins",
         "phlix-theme",
-        "phlix-themes",
         "phlix-ui",
-        "php83",
-        "psr12",
         "teal"
       ]
     },
@@ -167,12 +143,8 @@
         "jade",
         "mit-license",
         "oceanic",
-        "phlix-plugins",
         "phlix-theme",
-        "phlix-themes",
         "phlix-ui",
-        "php83",
-        "psr12",
         "teal"
       ]
     },
@@ -199,7 +171,6 @@
         "midnight",
         "oceanic",
         "phlix-plugin-theme",
-        "phlix-plugins",
         "phlix-theme",
         "teal"
       ]
@@ -227,7 +198,6 @@
         "midnight",
         "oceanic",
         "phlix-plugin-theme",
-        "phlix-plugins",
         "phlix-theme",
         "teal"
       ]
@@ -246,13 +216,7 @@
       "yanked": false,
       "author": "detain",
       "tags": [
-        "composer-package",
-        "emby",
-        "example",
-        "jellyfin",
-        "media-server",
-        "metadata-provider",
-        "plex"
+        "metadata-provider"
       ]
     },
     {
@@ -269,13 +233,7 @@
       "yanked": false,
       "author": "detain",
       "tags": [
-        "composer-package",
-        "emby",
-        "example",
-        "jellyfin",
-        "media-server",
-        "metadata-provider",
-        "plex"
+        "metadata-provider"
       ]
     },
     {
@@ -298,7 +256,6 @@
         "green-theme",
         "jade",
         "midnight-extended",
-        "phlix-plugins",
         "phlix-theme",
         "phlix-ui",
         "plugin",
@@ -327,7 +284,6 @@
         "green-theme",
         "jade",
         "midnight-extended",
-        "phlix-plugins",
         "phlix-theme",
         "phlix-ui",
         "plugin",
@@ -352,7 +308,6 @@
       "tags": [
         "last-fm",
         "lastfm",
-        "media-server",
         "music",
         "now-playing",
         "playback",
@@ -379,7 +334,6 @@
       "tags": [
         "last-fm",
         "lastfm",
-        "media-server",
         "music",
         "now-playing",
         "playback",
@@ -406,17 +360,12 @@
         "albums",
         "artists",
         "audio",
-        "composer-package",
         "discography",
-        "emby",
-        "jellyfin",
         "library",
-        "media-server",
         "metadata",
         "metadata-provider",
         "music",
         "musicbrainz",
-        "plex",
         "tracks"
       ],
       "summary": "Music metadata from MusicBrainz.",
@@ -440,17 +389,12 @@
         "albums",
         "artists",
         "audio",
-        "composer-package",
         "discography",
-        "emby",
-        "jellyfin",
         "library",
-        "media-server",
         "metadata",
         "metadata-provider",
         "music",
         "musicbrainz",
-        "plex",
         "tracks"
       ]
     },
@@ -469,16 +413,11 @@
       "author": "detain",
       "tags": [
         "anime",
-        "composer-package",
-        "emby",
-        "jellyfin",
         "mal",
         "manga",
-        "media-server",
         "metadata",
         "metadata-provider",
-        "myanimelist",
-        "plex"
+        "myanimelist"
       ],
       "summary": "Anime & manga metadata from MyAnimeList.",
       "description": "MyAnimeList metadata provider — anime/manga search, details and rankings via the MAL API v2."
@@ -498,16 +437,11 @@
       "author": "detain",
       "tags": [
         "anime",
-        "composer-package",
-        "emby",
-        "jellyfin",
         "mal",
         "manga",
-        "media-server",
         "metadata",
         "metadata-provider",
-        "myanimelist",
-        "plex"
+        "myanimelist"
       ]
     },
     {
@@ -528,7 +462,6 @@
         "design-system",
         "emerald",
         "mystic-jade",
-        "phlix-plugins",
         "phlix-theme",
         "phlix-theming",
         "phlix-ui",
@@ -556,7 +489,6 @@
         "design-system",
         "emerald",
         "mystic-jade",
-        "phlix-plugins",
         "phlix-theme",
         "phlix-theming",
         "phlix-ui",
@@ -588,7 +520,6 @@
         "midnight",
         "obsidian",
         "orange-accent",
-        "phlix-plugins",
         "phlix-theme",
         "phlix-ui",
         "theming",
@@ -617,7 +548,6 @@
         "midnight",
         "obsidian",
         "orange-accent",
-        "phlix-plugins",
         "phlix-theme",
         "phlix-ui",
         "theming",
@@ -639,18 +569,13 @@
       "author": "detain",
       "tags": [
         "aggregation",
-        "composer-package",
-        "emby",
         "imdb",
-        "jellyfin",
         "library",
-        "media-server",
         "metadata",
         "metadata-provider",
         "metascore",
         "movies",
         "omdb",
-        "plex",
         "ratings",
         "rotten-tomatoes",
         "tv"
@@ -673,18 +598,13 @@
       "author": "detain",
       "tags": [
         "aggregation",
-        "composer-package",
-        "emby",
         "imdb",
-        "jellyfin",
         "library",
-        "media-server",
         "metadata",
         "metadata-provider",
         "metascore",
         "movies",
         "omdb",
-        "plex",
         "ratings",
         "rotten-tomatoes",
         "tv"
@@ -706,15 +626,10 @@
       "tags": [
         "accessibility",
         "captions",
-        "composer-package",
         "download",
-        "emby",
         "foreign-audio",
-        "jellyfin",
         "library",
-        "media-server",
         "opensubtitles",
-        "plex",
         "srt",
         "srt-download",
         "subtitle-provider",
@@ -739,15 +654,10 @@
       "tags": [
         "accessibility",
         "captions",
-        "composer-package",
         "download",
-        "emby",
         "foreign-audio",
-        "jellyfin",
         "library",
-        "media-server",
         "opensubtitles",
-        "plex",
         "srt",
         "srt-download",
         "subtitle-provider",
@@ -768,18 +678,11 @@
       "yanked": false,
       "author": "detain",
       "tags": [
-        "codacy",
         "midnight",
         "mint-theme",
         "mit-license",
         "phantom-mint",
-        "phlix-plugins",
-        "phlix-theme",
-        "php83",
-        "php84",
-        "phpstan",
-        "phpunit",
-        "psr12"
+        "phlix-theme"
       ]
     },
     {
@@ -796,18 +699,11 @@
       "yanked": false,
       "author": "detain",
       "tags": [
-        "codacy",
         "midnight",
         "mint-theme",
         "mit-license",
         "phantom-mint",
-        "phlix-plugins",
-        "phlix-theme",
-        "php83",
-        "php84",
-        "phpstan",
-        "phpunit",
-        "psr12"
+        "phlix-theme"
       ]
     },
     {
@@ -856,10 +752,7 @@
         "design-system",
         "phantom-violet",
         "phantom-violet-theme",
-        "phlix-plugins",
         "phlix-theme",
-        "phlix-themes",
-        "php83",
         "purple",
         "theming",
         "violet",
@@ -884,10 +777,7 @@
         "design-system",
         "phantom-violet",
         "phantom-violet-theme",
-        "phlix-plugins",
         "phlix-theme",
-        "phlix-themes",
-        "php83",
         "purple",
         "theming",
         "violet",
@@ -913,16 +803,10 @@
         "accessibility",
         "appearance",
         "color-palette",
-        "composer-package",
         "css-variables",
         "dark-mode",
         "design-tokens",
-        "emby",
-        "example",
         "high-contrast",
-        "jellyfin",
-        "media-server",
-        "plex",
         "theme",
         "ui-theme"
       ]
@@ -944,16 +828,10 @@
         "accessibility",
         "appearance",
         "color-palette",
-        "composer-package",
         "css-variables",
         "dark-mode",
         "design-tokens",
-        "emby",
-        "example",
         "high-contrast",
-        "jellyfin",
-        "media-server",
-        "plex",
         "theme",
         "ui-theme"
       ]
@@ -977,9 +855,7 @@
         "css-theme",
         "dark-mode",
         "mystical",
-        "phlix-plugins",
         "phlix-theme",
-        "phlix-themes",
         "phlix-ui",
         "purple-theme",
         "spectral-dusk",
@@ -1007,9 +883,7 @@
         "css-theme",
         "dark-mode",
         "mystical",
-        "phlix-plugins",
         "phlix-theme",
-        "phlix-themes",
         "phlix-ui",
         "purple-theme",
         "spectral-dusk",
@@ -1032,12 +906,7 @@
       "yanked": false,
       "author": "detain",
       "tags": [
-        "composer-package",
-        "emby",
-        "jellyfin",
-        "media-server",
         "oauth",
-        "plex",
         "scrobbler",
         "scrobbling",
         "trakt",
@@ -1060,12 +929,7 @@
       "yanked": false,
       "author": "detain",
       "tags": [
-        "composer-package",
-        "emby",
-        "jellyfin",
-        "media-server",
         "oauth",
-        "plex",
         "scrobbler",
         "scrobbling",
         "trakt",
@@ -1093,7 +957,6 @@
         "dark-mode",
         "design-system",
         "frontend",
-        "phlix-plugins",
         "phlix-theme",
         "phlix-ui",
         "theming",
@@ -1123,7 +986,6 @@
         "dark-mode",
         "design-system",
         "frontend",
-        "phlix-plugins",
         "phlix-theme",
         "phlix-ui",
         "theming",
@@ -1153,7 +1015,6 @@
         "design-system",
         "ember",
         "modern",
-        "phlix-plugins",
         "phlix-theme",
         "theming",
         "volcanic-ember",
@@ -1181,7 +1042,6 @@
         "design-system",
         "ember",
         "modern",
-        "phlix-plugins",
         "phlix-theme",
         "theming",
         "volcanic-ember",
