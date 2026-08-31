@@ -4,13 +4,15 @@ Tests for phlix-plugins catalog validation.
 This module tests the plugins.json catalog against the rules documented
 in the README and enforced by CI:
 1. JSON Schema conformance
-2. Sorted by name with no duplicates
+2. Canonical order (name ascending, release-before-dev within a name, version
+   tie-break) with unique (name, version) pairs — the dev channel intentionally
+   reuses plugin names
 3. Lockstep ref + artifactSha256
 4. Plugin name format
 5. Repo URL format
 6. Ref (commit SHA) format
 7. artifactSha256 format
-8. Version semver format
+8. Version format: "dev" (dev-channel) or semver (release)
 9. Required fields present
 """
 import json

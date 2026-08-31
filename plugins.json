@@ -6,7 +6,7 @@
   "plugins": [
     {
       "name": "phlix-plugin-anidb",
-      "title": "Anidb",
+      "title": "AniDB",
       "type": "metadata-provider",
       "repo": "https://github.com/detain/phlix-plugin-anidb",
       "ref": "3bf51b6822b15ec990832169be0443189e28a729",
@@ -33,7 +33,7 @@
     },
     {
       "name": "phlix-plugin-anidb",
-      "title": "Anidb",
+      "title": "AniDB",
       "type": "metadata-provider",
       "repo": "https://github.com/detain/phlix-plugin-anidb",
       "ref": "0860a6481cf0e9b611a66df580f30deb75c69170",
@@ -58,7 +58,7 @@
     },
     {
       "name": "phlix-plugin-anilist",
-      "title": "Anilist",
+      "title": "AniList",
       "type": "metadata-provider",
       "repo": "https://github.com/detain/phlix-plugin-anilist",
       "ref": "64e61a9a7feb5fbc2a17af68f31874f21a5bc923",
@@ -91,7 +91,7 @@
     },
     {
       "name": "phlix-plugin-anilist",
-      "title": "Anilist",
+      "title": "AniList",
       "type": "metadata-provider",
       "repo": "https://github.com/detain/phlix-plugin-anilist",
       "ref": "a5aea5366fe187f4b15a7e7016e14162aa09aacf",
@@ -338,7 +338,7 @@
     },
     {
       "name": "phlix-plugin-lastfm",
-      "title": "Lastfm",
+      "title": "Last.fm",
       "type": "scrobbler",
       "repo": "https://github.com/detain/phlix-plugin-lastfm",
       "ref": "711c49769b4e09f578b974418d9aa13afaad4b75",
@@ -365,7 +365,7 @@
     },
     {
       "name": "phlix-plugin-lastfm",
-      "title": "Lastfm",
+      "title": "Last.fm",
       "type": "scrobbler",
       "repo": "https://github.com/detain/phlix-plugin-lastfm",
       "ref": "7a908ed0e70fd371fa244eb3f562f0e8bf8fceb2",
@@ -390,7 +390,7 @@
     },
     {
       "name": "phlix-plugin-musicbrainz",
-      "title": "Musicbrainz",
+      "title": "MusicBrainz",
       "type": "metadata-provider",
       "repo": "https://github.com/detain/phlix-plugin-musicbrainz",
       "ref": "ed37ee544d17dd7f0c7deaf35adee524999ce689",
@@ -424,7 +424,7 @@
     },
     {
       "name": "phlix-plugin-musicbrainz",
-      "title": "Musicbrainz",
+      "title": "MusicBrainz",
       "type": "metadata-provider",
       "repo": "https://github.com/detain/phlix-plugin-musicbrainz",
       "ref": "efc40cf5b9b376e0e0326abd411fa7e5ed12a7a1",
@@ -456,7 +456,7 @@
     },
     {
       "name": "phlix-plugin-myanimelist",
-      "title": "Myanimelist",
+      "title": "MyAnimeList",
       "type": "metadata-provider",
       "repo": "https://github.com/detain/phlix-plugin-myanimelist",
       "ref": "c7246dbbe25f152e5ad081b6574cd183ce121407",
@@ -485,7 +485,7 @@
     },
     {
       "name": "phlix-plugin-myanimelist",
-      "title": "Myanimelist",
+      "title": "MyAnimeList",
       "type": "metadata-provider",
       "repo": "https://github.com/detain/phlix-plugin-myanimelist",
       "ref": "84eadbab8c692d62877db9b30282f47e9adb23ce",
@@ -626,7 +626,7 @@
     },
     {
       "name": "phlix-plugin-omdb",
-      "title": "Omdb",
+      "title": "OMDb",
       "type": "metadata-provider",
       "repo": "https://github.com/detain/phlix-plugin-omdb",
       "ref": "da5754e25fc4f6b9422f45a15eda968291793d18",
@@ -660,7 +660,7 @@
     },
     {
       "name": "phlix-plugin-omdb",
-      "title": "Omdb",
+      "title": "OMDb",
       "type": "metadata-provider",
       "repo": "https://github.com/detain/phlix-plugin-omdb",
       "ref": "e68f28675e9497b8cfae1b1dcc8dd86ed929f107",
@@ -692,7 +692,7 @@
     },
     {
       "name": "phlix-plugin-opensubtitles",
-      "title": "Opensubtitles",
+      "title": "OpenSubtitles",
       "type": "subtitle-provider",
       "repo": "https://github.com/detain/phlix-plugin-opensubtitles",
       "ref": "c5d9f740d6e0e878044fd5df64a86800a3858fa5",
@@ -725,7 +725,7 @@
     },
     {
       "name": "phlix-plugin-opensubtitles",
-      "title": "Opensubtitles",
+      "title": "OpenSubtitles",
       "type": "subtitle-provider",
       "repo": "https://github.com/detain/phlix-plugin-opensubtitles",
       "ref": "9fb61f3bf44cefe3ea1605f5026c530ea6f3ef72",

@@ -334,6 +334,20 @@ jobs:
               return null;
           }
 
+          function pickTitle(mixed $ownTitle, array $entriesForName, string $name): string
+          {
+              // Automation must NEVER overwrite human curation: the target slot's existing
+              // non-empty title always wins. Otherwise carry a curated title from a sibling
+              // slot with the same name (so a curated release title flows into a plugin's
+              // first dev entry, and a human-edited dev title is never re-squashed); only
+              // genuinely fresh content derives its title from the repo name.
+              if (is_string($ownTitle) && $ownTitle !== '') {
+                  return $ownTitle;
+              }
+              $carried = carryField($entriesForName, 'title');
+              return $carried ?? deriveTitle($name);
+          }
+
           // ---------------------------------------------------------------------------
           // Phase A: discover candidate repos (topic search scoped to the detain org)
           // ---------------------------------------------------------------------------
@@ -447,9 +461,17 @@ jobs:
                   'topics' => $topics,
               ];
 
-              // tags (optional; a failed tags call degrades to dev-only — never fatal)
-              $tagsJson = trim((string) shell_exec('gh api repos/detain/' . $name . '/tags --jq \'.[] | [.name, .commit.sha] | @tsv\' 2>&1'));
+              // tags (optional; a failed tags call degrades to dev-only — never fatal).
+              // --paginate: a repo crossing the 30-tag page limit must not have its
+              // "latest" tag computed from page 1 alone (that could pin a stale tag and
+              // stale-REMOVE the correct release entry).
+              $tagsJson = trim((string) shell_exec('gh api --paginate repos/detain/' . $name . '/tags --jq \'.[] | [.name, .commit.sha] | @tsv\' 2>&1'));
               $tags = parseTagsSorted($tagsJson);
+              if (count($tags) === 0 && $tagsJson !== '') {
+                  // Non-empty response but nothing usable (e.g. a 403 rate-limit JSON body
+                  // captured via 2>&1) — degrade to "no tags" loudly, never silently.
+                  echo 'WARN ' . $name . ": tags response present but unparseable/zero-usable — treating as no tags\n";
+              }
               if (count($tags) > 0) {
                   $latest = $tags[0];
                   $release = fetchTargetTarball($name, $latest['sha'], $dir, '_tagged');
@@ -570,6 +592,13 @@ jobs:
                   continue;
               }
 
+              // Snapshot of this plugin's catalog entries BEFORE any write this run — the
+              // title-carry source for new or empty slots (see pickTitle).
+              $entriesForName = [];
+              foreach ($plugins['plugins'] as $entry) {
+                  if (($entry['name'] ?? '') === $name) $entriesForName[] = $entry;
+              }
+
               // synced tags: repo topics minus the family denylist, union the curated
               // tags already present on any of this plugin's catalog entries.
               $curatedTags = [];
@@ -654,7 +683,7 @@ jobs:
                           $entry['ref'] = $tagged['sha'];
                           $entry['artifactSha256'] = $tagged['sha256'];
                           $entry['type'] = $releaseType;
-                          $entry['title'] = deriveTitle($name);
+                          $entry['title'] = pickTitle($entry['title'] ?? null, $entriesForName, $name);
                           $entry['repo'] = 'https://github.com/detain/' . $name;
                           $entry['minServerVersion'] = $tagMinServer;
                           $entry['tags'] = $syncedTags;
@@ -686,7 +715,7 @@ jobs:
                           $carriedVerified = carryVerified($oldEntries);
                           $entry = [
                               'name' => $name,
-                              'title' => deriveTitle($name),
+                              'title' => pickTitle(null, $entriesForName, $name),
                               'type' => $releaseType,
                               'repo' => 'https://github.com/detain/' . $name,
                               'ref' => $tagged['sha'],
@@ -742,7 +771,7 @@ jobs:
                   $entry['artifactSha256'] = $st['sha256'];
                   $entry['version'] = DEV_VERSION;
                   $entry['type'] = $type;
-                  $entry['title'] = deriveTitle($name);
+                  $entry['title'] = pickTitle($entry['title'] ?? null, $entriesForName, $name);
                   $entry['repo'] = 'https://github.com/detain/' . $name;
                   $entry['minServerVersion'] = $devMinServer; // guaranteed by the contract gate
                   $entry['verified'] = false;
@@ -766,7 +795,7 @@ jobs:
               } else {
                   $entry = [
                       'name' => $name,
-                      'title' => deriveTitle($name),
+                      'title' => pickTitle(null, $entriesForName, $name),
                       'type' => $type,
                       'repo' => 'https://github.com/detain/' . $name,
                       'ref' => $st['ref'],
