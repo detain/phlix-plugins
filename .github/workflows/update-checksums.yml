@@ -56,7 +56,8 @@ jobs:
           //          tag name for old tags whose manifests predate the version field)
           //        - dev entry: pinned to default-branch HEAD; version literal "dev"
           //      Tags sync: per-plugin tags = union(repo topics minus the family
-          //      denylist, curated tags already in the catalog), applied to both entries.
+          //      denylist [dynamic majority + static floor], curated tags minus the
+          //      static floor), applied to both entries.
           //
           // Robustness contract: one malformed repo must never kill the job — every
           // per-repo failure prints "SKIP <name>: reason" and continues with the next
@@ -82,6 +83,26 @@ jobs:
               'player',
               'integration',
               'ui-theme',
+          ];
+          // Owner-curated static tag floor (2026-08-31): topics that are never useful as
+          // descriptive plugin tags regardless of how rare they are (family noise,
+          // ecosystem-brand topics, build-tooling topics). Unlike the dynamic majority
+          // denylist, the static floor filters curated tags too.
+          const STATIC_TAG_DENY = [
+              'phlix-plugins',
+              'phlix-themes',
+              'emby',
+              'example',
+              'jellyfin',
+              'plex',
+              'media-server',
+              'composer-package',
+              'psr12',
+              'php83',
+              'php84',
+              'phpstan',
+              'phpunit',
+              'codacy',
           ];
 
           function envOr(string $key, string $default): string
@@ -293,15 +314,20 @@ jobs:
               return $list;
           }
 
-          function computeSyncedTags(array $topics, array $curatedTags, array $denylist): array
+          function computeSyncedTags(array $topics, array $curatedTags, array $dynamicDenylist, array $staticDenylist): array
           {
               $out = [];
               foreach ($topics as $topic) {
-                  if (is_string($topic) && !isset($denylist[$topic])) {
-                      $out[$topic] = true;
-                  }
+                  if (!is_string($topic) || $topic === '') continue;
+                  $lower = strtolower($topic);
+                  // topic-derived: dropped by the static floor OR the dynamic majority rule
+                  if (isset($staticDenylist[$lower]) || isset($dynamicDenylist[$lower])) continue;
+                  $out[$topic] = true;
               }
               foreach (array_keys($curatedTags) as $tag) {
+                  // curated: dropped ONLY by the static floor — the dynamic majority rule
+                  // must never strip human curation (established curation-preservation).
+                  if (is_string($tag) && isset($staticDenylist[strtolower($tag)])) continue;
                   $out[$tag] = true;
               }
               return normalizeTags(array_keys($out));
@@ -554,9 +580,10 @@ jobs:
                   $denylist[$topic] = true;
               }
           }
-          if (count($denylist) > 0) {
-              echo 'denylist (' . count($denylist) . ' family topics across ' . $repoCount . ' repos, ' . count($topicCounts) . " distinct): " . implode(', ', array_keys($denylist)) . "\n";
-          }
+          // Static floor (owner-curated 2026-08-31): always dropped — from topics AND
+          // curated tags. Precomputed lowercase set; membership checks normalize.
+          $staticDeny = array_fill_keys(array_map('strtolower', STATIC_TAG_DENY), true);
+          echo 'denylist: dynamic(' . count($denylist) . ' family topics across ' . $repoCount . ' repos, ' . count($topicCounts) . ' distinct: ' . implode(', ', array_keys($denylist)) . ') + static(' . count($staticDeny) . ")\n";
 
           $removeIndexes = [];
           $changed = false;
@@ -609,7 +636,7 @@ jobs:
                       }
                   }
               }
-              $syncedTags = computeSyncedTags($st['topics'] ?? [], $curatedTags, $denylist);
+              $syncedTags = computeSyncedTags($st['topics'] ?? [], $curatedTags, $denylist, $staticDeny);
 
               $tagsChanged = false;
               $oldTagsCount = 0;
