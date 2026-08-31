@@ -119,8 +119,6 @@
         "jade",
         "mit-license",
         "oceanic",
-        "phlix-theme",
-        "phlix-ui",
         "teal"
       ]
     },
@@ -143,8 +141,6 @@
         "jade",
         "mit-license",
         "oceanic",
-        "phlix-theme",
-        "phlix-ui",
         "teal"
       ]
     },
@@ -170,8 +166,6 @@
         "emerald-abyss",
         "midnight",
         "oceanic",
-        "phlix-plugin-theme",
-        "phlix-theme",
         "teal"
       ]
     },
@@ -197,8 +191,6 @@
         "emerald-abyss",
         "midnight",
         "oceanic",
-        "phlix-plugin-theme",
-        "phlix-theme",
         "teal"
       ]
     },
@@ -256,8 +248,6 @@
         "green-theme",
         "jade",
         "midnight-extended",
-        "phlix-theme",
-        "phlix-ui",
         "plugin",
         "theming",
         "token-overrides",
@@ -284,8 +274,6 @@
         "green-theme",
         "jade",
         "midnight-extended",
-        "phlix-theme",
-        "phlix-ui",
         "plugin",
         "theming",
         "token-overrides",
@@ -462,9 +450,6 @@
         "design-system",
         "emerald",
         "mystic-jade",
-        "phlix-theme",
-        "phlix-theming",
-        "phlix-ui",
         "teal",
         "theming",
         "ui",
@@ -489,9 +474,6 @@
         "design-system",
         "emerald",
         "mystic-jade",
-        "phlix-theme",
-        "phlix-theming",
-        "phlix-ui",
         "teal",
         "theming",
         "ui",
@@ -520,8 +502,6 @@
         "midnight",
         "obsidian",
         "orange-accent",
-        "phlix-theme",
-        "phlix-ui",
         "theming",
         "ui"
       ]
@@ -548,8 +528,6 @@
         "midnight",
         "obsidian",
         "orange-accent",
-        "phlix-theme",
-        "phlix-ui",
         "theming",
         "ui"
       ]
@@ -681,8 +659,7 @@
         "midnight",
         "mint-theme",
         "mit-license",
-        "phantom-mint",
-        "phlix-theme"
+        "phantom-mint"
       ]
     },
     {
@@ -702,8 +679,7 @@
         "midnight",
         "mint-theme",
         "mit-license",
-        "phantom-mint",
-        "phlix-theme"
+        "phantom-mint"
       ]
     },
     {
@@ -728,7 +704,6 @@
         "mint",
         "mint-theme",
         "phantom-mint",
-        "phlix-ui-theme",
         "teal",
         "theming",
         "ui-design"
@@ -752,7 +727,6 @@
         "design-system",
         "phantom-violet",
         "phantom-violet-theme",
-        "phlix-theme",
         "purple",
         "theming",
         "violet",
@@ -777,7 +751,6 @@
         "design-system",
         "phantom-violet",
         "phantom-violet-theme",
-        "phlix-theme",
         "purple",
         "theming",
         "violet",
@@ -855,8 +828,6 @@
         "css-theme",
         "dark-mode",
         "mystical",
-        "phlix-theme",
-        "phlix-ui",
         "purple-theme",
         "spectral-dusk",
         "teal-theme",
@@ -883,8 +854,6 @@
         "css-theme",
         "dark-mode",
         "mystical",
-        "phlix-theme",
-        "phlix-ui",
         "purple-theme",
         "spectral-dusk",
         "teal-theme",
@@ -957,8 +926,6 @@
         "dark-mode",
         "design-system",
         "frontend",
-        "phlix-theme",
-        "phlix-ui",
         "theming",
         "user-interface",
         "void-bloom",
@@ -986,8 +953,6 @@
         "dark-mode",
         "design-system",
         "frontend",
-        "phlix-theme",
-        "phlix-ui",
         "theming",
         "user-interface",
         "void-bloom",
@@ -1015,7 +980,6 @@
         "design-system",
         "ember",
         "modern",
-        "phlix-theme",
         "theming",
         "volcanic-ember",
         "web-development"
@@ -1042,7 +1006,6 @@
         "design-system",
         "ember",
         "modern",
-        "phlix-theme",
         "theming",
         "volcanic-ember",
         "web-development"
