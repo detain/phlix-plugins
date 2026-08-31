@@ -86,9 +86,9 @@
           "pattern": "^[0-9a-f]{64}$"
         },
         "version": {
-          "description": "The plugin's semver at the pinned ref (read from its plugin.json).",
+          "description": "The plugin's version at the pinned ref. For a release entry this is the semver read from the plugin.json at the tag commit (never the tag name's v-prefix form). The literal string \"dev\" denotes the dev-channel entry: the plugin repo's default-branch HEAD at last update — ref + artifactSha256 are that HEAD commit and its codeload tarball digest, NOT a semver release. A plugin appears at most twice: one release entry (semver) plus one dev entry (\"dev\").",
           "type": "string",
-          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-(?:(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+[0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*)?$"
+          "pattern": "^(?:dev|(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-(?:(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+[0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*)?)$"
         },
         "minServerVersion": {
           "description": "Minimum Phlix server version required to run this plugin (from its plugin.json phlix_min_server_version at the pinned ref). The admin UI shows 'incompatible' before download when the running server is older.",

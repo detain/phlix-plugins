@@ -11,21 +11,22 @@ single plugin repo URL directly.
 
 | Plugin | Type | Version | Min Server | Repo |
 |---|---|---|---|---|
-| AniDB | metadata-provider | 0.4.1 | ≥ 1.2.0 | [phlix-plugin-anidb](https://github.com/detain/phlix-plugin-anidb) |
-| AniList | metadata-provider | 0.4.0 | ≥ 1.2.0 | [phlix-plugin-anilist](https://github.com/detain/phlix-plugin-anilist) |
-| Last.fm | scrobbler | 1.2.0 | ≥ 1.2.0 | [phlix-plugin-lastfm](https://github.com/detain/phlix-plugin-lastfm) |
-| MusicBrainz | metadata-provider | 0.4.0 | ≥ 1.2.0 | [phlix-plugin-musicbrainz](https://github.com/detain/phlix-plugin-musicbrainz) |
-| MyAnimeList | metadata-provider | 0.3.0 | ≥ 1.2.0 | [phlix-plugin-myanimelist](https://github.com/detain/phlix-plugin-myanimelist) |
-| OMDb | metadata-provider | 0.3.0 | ≥ 1.2.0 | [phlix-plugin-omdb](https://github.com/detain/phlix-plugin-omdb) |
-| OpenSubtitles | subtitle-provider | 0.6.0 | ≥ 1.2.0 | [phlix-plugin-opensubtitles](https://github.com/detain/phlix-plugin-opensubtitles) |
-| Trakt | scrobbler | 1.5.0 | ≥ 1.2.0 | [phlix-plugin-trakt](https://github.com/detain/phlix-plugin-trakt) |
+| AniDB | metadata-provider | 0.3.0 | ≥ 1.2.0 | [phlix-plugin-anidb](https://github.com/detain/phlix-plugin-anidb) |
+| AniList | metadata-provider | 0.2.0 | ≥ 1.2.0 | [phlix-plugin-anilist](https://github.com/detain/phlix-plugin-anilist) |
+| Last.fm | scrobbler | 1.1.0 | ≥ 1.2.0 | [phlix-plugin-lastfm](https://github.com/detain/phlix-plugin-lastfm) |
+| MusicBrainz | metadata-provider | 0.2.0 | ≥ 1.2.0 | [phlix-plugin-musicbrainz](https://github.com/detain/phlix-plugin-musicbrainz) |
+| MyAnimeList | metadata-provider | 0.2.0 | ≥ 1.2.0 | [phlix-plugin-myanimelist](https://github.com/detain/phlix-plugin-myanimelist) |
+| OMDb | metadata-provider | 0.2.0 | ≥ 1.2.0 | [phlix-plugin-omdb](https://github.com/detain/phlix-plugin-omdb) |
+| OpenSubtitles | subtitle-provider | 0.2.0 | ≥ 1.2.0 | [phlix-plugin-opensubtitles](https://github.com/detain/phlix-plugin-opensubtitles) |
+| Trakt | scrobbler | 1.2.0 | ≥ 1.2.0 | [phlix-plugin-trakt](https://github.com/detain/phlix-plugin-trakt) |
 
 ## Catalog format (`plugins.json`)
 
 The document shape is described by [`plugins.schema.json`](plugins.schema.json)
 (JSON Schema, Draft 2020-12) and validated in CI by
 [`.github/workflows/validate-catalog.yml`](.github/workflows/validate-catalog.yml),
-which also asserts entries are sorted by `name` with no duplicates and that each
+which also asserts entries are in canonical order (sorted by `name`, release before
+the `dev` entry within a name) with unique (`name`, `version`) pairs, and that each
 pinned plugin's `plugin.json` satisfies the phlix-shared manifest schema (the
 same contract the server enforces at install time). `schemaVersion` is now `2`:
 every entry **pins an exact commit** (`ref`) and the **sha256 of the codeload
@@ -45,9 +46,9 @@ moving branch.
       "summary": "Anime metadata from AniDB.",
       "description": "AniDB metadata provider — …",
       "repo": "https://github.com/detain/phlix-plugin-anidb",
-      "ref": "4b80320afcaf876767717d027b5200f69f2ab5b8",
-      "artifactSha256": "a9854f188ac0a4b8dc629ecc25411a142b3b155058b9a67ba78a60d77be2dd66",
-      "version": "0.4.1",
+      "ref": "3bf51b6822b15ec990832169be0443189e28a729",
+      "artifactSha256": "6de62ceef330f18faebc1e1b400dd4566ba4b25578164950b36d439ddb692b85",
+      "version": "0.3.0",
       "minServerVersion": "1.2.0",
       "verified": true,
       "deprecated": false,
@@ -67,10 +68,10 @@ moving branch.
 | `repo` | yes | Human repo URL the plugin lives at (`github.com/detain/phlix-plugin-*`). |
 | `ref` | yes | 40-char lowercase commit sha the entry is **pinned** to (not a branch/tag). |
 | `artifactSha256` | yes | Bare 64-hex sha256 of `…/archive/<ref>.tar.gz` (no `sha256:` prefix). |
-| `version` | yes | The plugin's semver at the pinned `ref` (from its `plugin.json`). |
+| `version` | yes | Semver at the pinned `ref` (from its `plugin.json`), or the literal `"dev"` for a plugin's dev-channel entry (HEAD of the default branch — re-pinned every catalog refresh, always `verified: false`). A plugin appears as a release entry plus, once the refresh has seen it, a `dev` entry with the same `name`. |
 | `minServerVersion` | no | Minimum Phlix server version required (from the plugin's `phlix_min_server_version` at the pinned `ref`). The admin UI shows "incompatible" pre-download when the running server is older. |
 | `maxServerVersion` | no | Maximum Phlix server version supported (exclusive upper bound). |
-| `verified` | no | Whether this entry has been reviewed by the catalog maintainer (`true` for all official entries). Un-verified entries are install-blocked by the server in default-deny mode. |
+| `verified` | no | Whether this entry has been reviewed by the catalog maintainer. Un-verified entries are install-blocked by the server in default-deny mode. Dev-channel entries are always `false`; auto-discovered entries start `false`. |
 | `deprecated` | no | Whether this plugin is deprecated. Deprecated entries may still be installable but the server warns operators. |
 | `yanked` | no | Whether this version has been withdrawn. Yanked entries are hidden from the catalog listing. |
 | `deprecationMessage` | no | Human-readable message shown for deprecated/yanked entries. |
@@ -118,8 +119,9 @@ npx --yes -p ajv-cli@5 -p ajv-formats@2 ajv validate \
 #   python3 -m pip install check-jsonschema
 #   check-jsonschema --schemafile plugins.schema.json plugins.json
 
-# CI also gates sort order / duplicates — entries must be sorted by `name`:
-jq -e -r '.plugins | map(.name) | if . == sort then "OK" else "ERROR: unsorted" | halt_error(1) end' plugins.json
+# CI also gates canonical order / (name,version) dupes — sort key:
+# [name, dev-last flag, version]. Check with:
+jq -e -r '.plugins as $p | ($p | sort_by([.name, (if .version=="dev" then 1 else 0 end), .version])) as $s | if $p == $s then "OK" else "ERROR: not canonical" | halt_error(1) end' plugins.json
 ```
 
 ## Add your own
