@@ -28,7 +28,8 @@ The document shape is described by [`plugins.schema.json`](plugins.schema.json)
 which also asserts entries are in canonical order (sorted by `name`, release before
 the `dev` entry within a name) with unique (`name`, `version`) pairs, and that each
 pinned plugin's `plugin.json` satisfies the phlix-shared manifest schema (the
-same contract the server enforces at install time). `schemaVersion` is now `2`:
+same contract the server enforces at install time) — plus a `pytest` job that
+runs the catalog test suite in `tests/test_catalog.py`. `schemaVersion` is now `2`:
 every entry **pins an exact commit** (`ref`) and the **sha256 of the codeload
 tarball** for that commit (`artifactSha256`), so the Phlix server can verify the
 bytes it downloads before installing. Installs target the pinned commit, never a
@@ -122,6 +123,16 @@ npx --yes -p ajv-cli@5 -p ajv-formats@2 ajv validate \
 # CI also gates canonical order / (name,version) dupes — sort key:
 # [name, dev-last flag, version]. Check with:
 jq -e -r '.plugins as $p | ($p | sort_by([.name, (if .version=="dev" then 1 else 0 end), .version])) as $s | if $p == $s then "OK" else "ERROR: not canonical" | halt_error(1) end' plugins.json
+```
+
+The same assertions (schema conformance, canonical order, `(name, version)`
+uniqueness, `ref`/`artifactSha256` lockstep and format, `dev` entries never
+`verified`) are covered by the pytest suite in [`tests/test_catalog.py`](tests/test_catalog.py)
+(fixtures in [`tests/conftest.py`](tests/conftest.py), config in [`pytest.ini`](pytest.ini)):
+
+```bash
+python3 -m pip install -r requirements-test.txt
+python3 -m pytest tests/ -v --tb=short --cov=. --cov-report=term-missing
 ```
 
 ## Add your own
