@@ -37,13 +37,13 @@ permissions:
 jobs:
   schema:
     name: JSON-Schema + sort/dedup
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '24'
           # No `cache: npm` — there is no lockfile in this repo (known landmine).
@@ -93,11 +93,11 @@ jobs:
 
   pytest:
     name: pytest catalog tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # Runs comprehensive pytest tests against the catalog structure
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -114,12 +114,12 @@ jobs:
 
   pin-drift:
     name: Pin-drift (non-blocking)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # Surfaces ref/artifactSha256 drift without ever failing a PR.
     continue-on-error: true
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Verify each entry's artifactSha256 matches its pinned tarball
         run: |
@@ -156,17 +156,17 @@ jobs:
 
   manifest:
     name: Plugin manifest schema (blocking)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # BLOCKING: every pinned plugin's plugin.json must satisfy the phlix-shared
     # manifest schema — the same contract the server validates at install time
     # (PluginLoader::finalizeInstall). Prevents pinning a plugin that would fail
     # to install (bad `type`, forbidden `settings.*` key like `managed`, etc.).
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '24'
           # No `cache: npm` — there is no lockfile in this repo (known landmine).
