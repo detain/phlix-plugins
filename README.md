@@ -3,9 +3,12 @@
 The default **plugin catalog** for [Phlix](https://github.com/detain/phlix-server).
 
 `plugins.json` lists the official Phlix plugins and where to install them from.
-The Phlix admin **Plugins** section loads this catalog by default, so you can
-browse and install plugins in one click — or add another catalog URL, or paste a
-single plugin repo URL directly.
+The Phlix admin **Plugins** section loads this catalog by default — at a pinned
+catalog **release tag**, not at `master` (see
+[Publishing a catalog release](#publishing-a-catalog-release-what-servers-actually-read);
+a merge to master is not live for operators until a tag is cut and the server's
+pin follows it) — so you can browse and install plugins in one click, or add
+another catalog URL, or paste a single plugin repo URL directly.
 
 ## Plugins
 
@@ -28,8 +31,13 @@ The document shape is described by [`plugins.schema.json`](plugins.schema.json)
 which also asserts entries are in canonical order (sorted by `name`, release before
 the `dev` entry within a name) with unique (`name`, `version`) pairs, and that each
 pinned plugin's `plugin.json` satisfies the phlix-shared manifest schema (the
-same contract the server enforces at install time) — plus a `pytest` job that
-runs the catalog test suite in `tests/test_catalog.py`. `schemaVersion` is now `2`:
+same contract the server enforces at install time — fetched at a **pinned tag**
+and sha256-digest-verified, never a floating branch) — plus a `pytest` job that
+runs the catalog test suite in `tests/test_catalog.py`, including tripwires that
+pin the CI workflows' own trust laws. The structural half of that gate lives in
+[`scripts/catalog-gate.jq`](scripts/catalog-gate.jq): the single-source filter the
+updater ALSO re-runs on its computed file before every bot push. `schemaVersion`
+is now `2`:
 every entry **pins an exact commit** (`ref`) and the **sha256 of the codeload
 tarball** for that commit (`artifactSha256`), so the Phlix server can verify the
 bytes it downloads before installing. Installs target the pinned commit, never a
@@ -70,9 +78,9 @@ moving branch.
 | `ref` | yes | 40-char lowercase commit sha the entry is **pinned** to (not a branch/tag). |
 | `artifactSha256` | yes | Bare 64-hex sha256 of `…/archive/<ref>.tar.gz` (no `sha256:` prefix). |
 | `version` | yes | Semver at the pinned `ref` (from its `plugin.json`), or the literal `"dev"` for a plugin's dev-channel entry (HEAD of the default branch — re-pinned every catalog refresh, always `verified: false`). A plugin appears as a release entry plus, once the refresh has seen it, a `dev` entry with the same `name`. |
-| `minServerVersion` | no | Minimum Phlix server version required (from the plugin's `phlix_min_server_version` at the pinned `ref`). The admin UI shows "incompatible" pre-download when the running server is older. |
-| `maxServerVersion` | no | Maximum Phlix server version supported (exclusive upper bound). |
-| `verified` | no | Whether this entry has been reviewed by the catalog maintainer. Un-verified entries are install-blocked by the server in default-deny mode. Dev-channel entries are always `false`; auto-discovered entries start `false`. |
+| `minServerVersion` | no | Minimum Phlix server version the plugin declares (from its `phlix_min_server_version` at the pinned `ref`). **Catalog metadata only:** the current server does not include this field in its catalog wire shape and does not pre-gate the admin UI with it — it enforces compatibility at install time, after download, from the plugin's own manifest (`PluginLoader::satisfiesServerVersion`). |
+| `maxServerVersion` | no | Maximum Phlix server version supported (exclusive upper bound). Same metadata-only status as `minServerVersion`. |
+| `verified` | no | Whether this entry has been reviewed by the catalog maintainer. Un-verified entries are install-blocked by the server in default-deny mode. Dev-channel entries are always `false`; auto-discovered entries start `false`. The updater RESETS a carried `true` to `false` as a re-attestation event whenever an auto pin move is not a fast-forward of the previously pinned commit, or a tag is recreated (same version, different commit). |
 | `deprecated` | no | Whether this plugin is deprecated. Deprecated entries may still be installable but the server warns operators. |
 | `yanked` | no | Whether this version has been withdrawn. Yanked entries are hidden from the catalog listing. |
 | `deprecationMessage` | no | Human-readable message shown for deprecated/yanked entries. |
@@ -85,10 +93,70 @@ git diff, so a malicious silent rewrite of an install target is visible in
 history. Operators adding their own catalog SHOULD pin `ref` + `artifactSha256`
 or the server will refuse the install in default-deny mode.
 
-### Updating a pin
+One consequence of GitHub's event model worth knowing (and the reason the
+updater carries its own gate): commits pushed by the updater's `GITHUB_TOKEN`
+do **not** re-trigger workflows — GitHub skips workflow starts for bot pushes
+made with that token. The bot's own pushes therefore pass only the structural
+gate (`scripts/catalog-gate.jq`, re-run inside the updater as a pre-push step:
+valid input, canonical order, pair uniqueness, schema-shape mirror,
+dev-never-verified); ajv's full schema check, the pytest suite, the pin-drift
+re-hash and the manifest-contract gate run against every HUMAN push and PR —
+including the human review push of a bot commit, which is how a bot-era
+regression still reaches a red gate. Trust-boundary decisions the structural
+gate cannot make (lineage of a carried `verified`, org ownership of a fetch
+target) are enforced inside the updater itself — see its workflow header.
 
-`ref` and `artifactSha256` **must always move in lockstep** — they describe the
-same commit. To re-pin a plugin to a newer commit:
+## How the catalog is regenerated (`update-checksums.yml`)
+
+Despite the file name, the scheduled workflow
+([`.github/workflows/update-checksums.yml`](.github/workflows/update-checksums.yml))
+is a **catalog generator**, not a checksum fixer: it rebuilds every *discovered*
+plugin's entry from the plugin repo's current state, then pushes when anything
+moved.
+
+- **Admission contract:** a plugin is in the official catalog iff its repo is in
+  the `detain` org, carries the `phlix-plugin` topic, and ships a `plugin.json`
+  that validates against the phlix-shared manifest contract. There is no
+  allow-list step — the topic IS the opt-in.
+- **Per discovered plugin:** a `release` entry at the latest semver tag (version
+  read from that tag's `plugin.json`, `ref` = the tag commit, `artifactSha256` =
+  sha256 of the codeload `archive/<ref>.tar.gz` bytes), plus a `dev` entry pinned
+  to the default-branch HEAD (`version` literal `"dev"`, always
+  `verified: false`). Release entries whose version no longer matches the latest
+  tag are removed (stale-version cleanup); repo tags sync into `tags` minus a
+  dynamic majority-family denylist and the owner-curated static floor.
+- **Curated fields survive roll-forwards:** `title` (own > derived), `summary`
+  and `description` carry forward; `verified` carries only while the pin ADVANCES
+  along fast-forward lineage — a recreated tag (same version, new commit) or a
+  non-ancestor pin move resets it to `false` (re-attestation, see the workflow
+  header). New auto-discovered entries start `verified: false`.
+- **Triggers:** a 6-hourly cron, a push to `master`/`main`, and manual
+  `repository_dispatch` of type `plugin-push` (the payload is never read — a
+  dispatch just means "run now").
+- **Shape:** one PHP-first job (`shell_exec` of `gh`/`curl`/`sha256sum` — no
+  Python there by owner law), self-gated before push via
+  `scripts/catalog-gate.jq` because its own `GITHUB_TOKEN` pushes do not re-run
+  CI (see the trust-root note above).
+
+### Hand-repinning — and what survives the bot
+
+For plugins the updater **discovers** (the official set), pins are derived, not
+authored:
+
+- A release entry's `ref`/`artifactSha256`/`version` follow the plugin's
+  **semver tags**. Hand-pinning a discovered release entry to an untagged commit
+  is deleted or re-pinned by the bot on the very next run — the stale-version
+  cleanup sees a version that doesn't match the latest tag.
+- A `dev` entry re-pins to HEAD every run; hand edits there don't survive
+  either (that is the channel's purpose).
+- To move an official pin: cut the tag in the plugin repo (release), or push the
+  default branch and dispatch `plugin-push` (dev). Do not edit `plugins.json` by
+  hand for discovered plugins.
+
+Entries the updater does **not** discover — your own fork's catalog, or a plugin
+whose repo lost its topic — are never touched, and there the manual recipe is
+authoritative. `ref` and `artifactSha256` **must always move in lockstep** —
+they describe the same commit:
 
 ```bash
 # 1. resolve the new commit sha
@@ -102,36 +170,55 @@ sha=$(curl -sL https://github.com/detain/phlix-plugin-<x>/archive/$ref.tar.gz | 
 ```
 
 Never bump `ref` without recomputing `artifactSha256` (and vice versa); CI
-validates shape, sort order and every pinned plugin's `plugin.json` manifest, and
-the server rejects an install whose downloaded bytes do not hash to the recorded
-`artifactSha256`. A scheduled job
-([`.github/workflows/update-checksums.yml`](.github/workflows/update-checksums.yml),
-every 6 hours) walks the `plugins` array, recomputes each plugin's tarball digest
-and commits `artifactSha256` changes to `plugins.json` — review those commits,
-since a digest that moves without its `ref` violates the lockstep rule above.
+validates shape, sort order and every pinned plugin's `plugin.json` manifest,
+the blocking pin-drift job re-hashes each pinned tarball on pushes, and the
+server rejects an install whose downloaded bytes do not hash to the recorded
+`artifactSha256`.
+
+## Publishing a catalog release (what servers actually read)
+
+Server-side Phlix does **not** track this repo's `master`. The stable channel
+resolves the official catalog at an immutable release *tag* pinned in server
+code — `CatalogSourceResolver::OFFICIAL_PINNED_REF` in
+[phlix-server](https://github.com/detain/phlix-server) (operators can override
+that ref with the `PHLIX_PLUGINS_CATALOG_REF` environment variable). Bot commits
+and reviewed merges to `master` therefore change what *reviewers* see, not what
+*installs* happen — do not treat a "review those commits" style push as a
+release action.
+
+To publish catalog changes to operators:
+
+1. Land them on `master` (a human push, or the updater's refreshed push).
+2. Cut a catalog release tag here (semver, e.g. `v2.5.0`) — release waves are
+   maintainer-scheduled; the automation never tags.
+3. Bump `OFFICIAL_PINNED_REF` in phlix-server to the new tag (or have operators
+   set `PHLIX_PLUGINS_CATALOG_REF`).
 
 ## Validating locally
 
 ```bash
-# ajv-cli needs ajv-formats for the "uri" format keyword:
-npx --yes -p ajv-cli@5 -p ajv-formats@2 ajv validate \
+# ajv-cli needs ajv-formats for the "uri" format keyword — exact versions, the
+# same pins the CI schema job uses (floating @5/@2 re-resolve to upstream-next):
+npx --yes -p ajv-cli@5.0.0 -p ajv-formats@2.1.1 ajv validate \
   --spec=draft2020 -c ajv-formats -s plugins.schema.json -d plugins.json
 # or with check-jsonschema:
 #   python3 -m pip install check-jsonschema
 #   check-jsonschema --schemafile plugins.schema.json plugins.json
 
-# CI also gates canonical order / (name,version) dupes — sort key:
-# [name, dev-last flag, version]. Check with:
-jq -e -r '.plugins as $p | ($p | sort_by([.name, (if .version=="dev" then 1 else 0 end), .version])) as $s | if $p == $s then "OK" else "ERROR: not canonical" | halt_error(1) end' plugins.json
+# The canonical-order / (name,version) dedup / shape-mirror gate (single source
+# of truth — the same script CI runs, and the updater runs before pushing):
+jq -e -r -f scripts/catalog-gate.jq plugins.json
 ```
 
 The same assertions (schema conformance, canonical order, `(name, version)`
 uniqueness, `ref`/`artifactSha256` lockstep and format, `dev` entries never
-`verified`) are covered by the pytest suite in [`tests/test_catalog.py`](tests/test_catalog.py)
+`verified`) — plus tripwires pinning the CI workflows' own trust laws — are
+covered by the pytest suite in [`tests/test_catalog.py`](tests/test_catalog.py)
 (fixtures in [`tests/conftest.py`](tests/conftest.py), config in [`pytest.ini`](pytest.ini)):
 
 ```bash
-python3 -m pip install -r requirements-test.txt
+# --require-hashes installs exactly the hash-locked closure CI installs:
+python3 -m pip install --require-hashes -r requirements-test.txt
 python3 -m pytest tests/ -v --tb=short --cov=. --cov-report=term-missing
 ```
 
@@ -141,6 +228,16 @@ Fork this repo (or create your own), edit `plugins.json` (keeping it valid
 against `plugins.schema.json` — pin `ref` + `artifactSha256` + `version` per
 entry), and add its URL as a plugin source in the Phlix admin **Plugins**
 section.
+
+**On a fork, delete or disable `.github/workflows/update-checksums.yml` before
+enabling Actions.** The updater is hardcoded to the `detain` org end to end
+(org-scoped discovery, detain tarball fetches, `repo`-field construction): left
+enabled it would rewrite your `plugins.json` into a copy of the official catalog
+— it now aborts with an error step instead of doing that silently, but the
+correct fork posture is removal. The rest of the toolchain is fork-safe with one
+edit: relax the `^https://github\.com/detain/` repo pattern in
+`plugins.schema.json` (and the same mirror in `scripts/catalog-gate.jq`) to your
+own org.
 
 ## License
 

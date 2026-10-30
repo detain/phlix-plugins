@@ -91,17 +91,17 @@
           "pattern": "^(?:dev|(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-(?:(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+[0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*)?)$"
         },
         "minServerVersion": {
-          "description": "Minimum Phlix server version required to run this plugin (from its plugin.json phlix_min_server_version at the pinned ref). The admin UI shows 'incompatible' before download when the running server is older.",
+          "description": "Minimum Phlix server version the plugin declares (from its plugin.json phlix_min_server_version at the pinned ref). Catalog metadata only: the current server does NOT include this field in its catalog wire shape and does not gate the admin UI before download — it enforces compatibility at install time from the plugin's own manifest (PluginLoader::satisfiesServerVersion).",
           "type": "string",
           "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-(?:(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+[0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*)?$"
         },
         "maxServerVersion": {
-          "description": "Maximum Phlix server version supported by this plugin (exclusive upper bound). Optional.",
+          "description": "Maximum Phlix server version supported by this plugin (exclusive upper bound). Optional. Catalog metadata only — same wire/enforcement situation as minServerVersion.",
           "type": "string",
           "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-(?:(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+[0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*)?$"
         },
         "verified": {
-          "description": "Whether this entry has been reviewed and verified by the catalog maintainer. An un-verified entry (false) is install-blocked by the server in default-deny mode.",
+          "description": "Whether this entry has been reviewed and verified by the catalog maintainer. An un-verified entry (false) is install-blocked by the server in default-deny mode. Dev-channel entries are always false and auto-discovered entries start false. The updater RESETS a carried true to false as a re-attestation event when the pin moves outside fast-forward lineage, or when a tag is recreated (same version, different commit).",
           "type": "boolean"
         },
         "deprecated": {
