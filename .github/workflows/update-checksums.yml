@@ -15,6 +15,21 @@ jobs:
   update-checksums:
     runs-on: ubuntu-26.04
     steps:
+      - name: Refuse to run outside the official repo
+        # M-13: the updater is hardcoded to the detain org end to end (org-scoped
+        # topic discovery, gh contents read of detain/phlix-plugins, detain tarball
+        # fetch URLs, repo-field construction). A fork that merely enables Actions
+        # would have its own plugins.json REWRITTEN into a copy of the official
+        # catalog by this same schedule — silently and with a bot commit that
+        # looks legitimate. Abort loudly with the correct fork instruction instead.
+        run: |
+          if [ "${GITHUB_REPOSITORY_OWNER}" != "detain" ]; then
+            echo "ERROR: update-checksums only makes sense on detain/phlix-plugins." >&2
+            echo "       On forks, delete or disable .github/workflows/update-checksums.yml" >&2
+            echo "       (and relax the repo-pattern in plugins.schema.json for your org)." >&2
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
