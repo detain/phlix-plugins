@@ -61,8 +61,11 @@ updater ALSO re-runs on its computed file before every bot push. `schemaVersion`
 is now `2`:
 every entry **pins an exact commit** (`ref`) and the **sha256 of the codeload
 tarball** for that commit (`artifactSha256`), so the Phlix server can verify the
-bytes it downloads before installing. Installs target the pinned commit, never a
-moving branch.
+bytes it downloads before installing. Installs always target that one immutable
+commit, never a moving branch — including a `dev` entry: its commit is the
+default branch's HEAD *as re-captured by the updater at the last refresh*, so the
+dev channel follows the branch by re-pinning forward, not by asking installers
+to resolve a branch name.
 
 ```json
 {
@@ -89,12 +92,23 @@ moving branch.
 }
 ```
 
+Catalog **top-level** fields (per `plugins.schema.json`):
+
 | Field | Required | Meaning |
 |---|---|---|
-| `schemaVersion` | yes (top level) | Catalog format version — currently `2`. |
+| `schemaVersion` | yes | Catalog format version — currently `2`. |
+| `name` | yes | Human-readable catalog name (`"Phlix Official Plugins"`). |
+| `plugins` | yes | The entries array below; at least one entry. |
+| `description` | no | Optional long description of the catalog itself. |
+| `homepage` | no | Optional catalog homepage URL. |
+
+Per-**entry** fields (each object in `plugins`):
+
+| Field | Required | Meaning |
+|---|---|---|
 | `name` | yes | The plugin's manifest name (`^phlix-plugin-[a-z0-9][a-z0-9-]*$`). |
 | `title` | yes | Display name. |
-| `type` | yes | Plugin category (`metadata-provider`, `scrobbler`, …). |
+| `type` | yes | Plugin category — the full schema enum is `metadata-provider`, `scrobbler`, `subtitle-provider`, `notifier`, `player`, `integration`, `ui-theme`. (`ui-theme` — a plugin registering a `Phlix\Theming\ThemeSourceInterface` entry class — is the catalog's largest category by name count, 12 of the 21 current names.) |
 | `repo` | yes | Human repo URL the plugin lives at (`github.com/detain/phlix-plugin-*`). |
 | `ref` | yes | 40-char lowercase commit sha the entry is **pinned** to (not a branch/tag). |
 | `artifactSha256` | yes | Bare 64-hex sha256 of `…/archive/<ref>.tar.gz` (no `sha256:` prefix). |
