@@ -40,6 +40,13 @@ name: Validate catalog
 #     passed via `-c ajv-formats`), otherwise the `uri` format keyword errors.
 #   - The schema is Draft 2020-12, so ajv needs `--spec=draft2020`.
 #   - NO setup-node `cache: npm` — this repo has no lockfile.
+#
+# Toolchain law (review phlix-plugins__seceng M-07): every `uses:` action is
+# pinned to a full commit SHA (release tag in the trailing comment), the ajv
+# validator runs at EXACT npm versions, and the pytest job installs from the
+# hash-locked requirements-test.txt with --require-hashes. Bumps are deliberate,
+# diff-visible edits — never silent resolution drift. TestWorkflowContract in
+# tests/test_catalog.py reddens if any of this regresses.
 
 on:
   push:
@@ -55,19 +62,21 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Set up Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6.5.0
         with:
           node-version: '24'
           # No `cache: npm` — there is no lockfile in this repo (known landmine).
 
       - name: Validate plugins.json against plugins.schema.json
         run: |
-          # ajv-cli@5 (ajv v8) for Draft 2020-12; ajv-formats@2 supplies the
-          # `uri` format keyword the schema relies on. Both pinned.
-          npx --yes --package ajv-cli@5 --package ajv-formats@2 -- \
+          # ajv-cli 5.0.0 (ajv v8) for Draft 2020-12; ajv-formats 2.1.1 supplies
+          # the `uri` format keyword the schema relies on. EXACT versions — npx
+          # major-ranges (@5/@2) re-resolve to whatever upstream ships next
+          # (review phlix-plugins__seceng M-07).
+          npx --yes --package ajv-cli@5.0.0 --package ajv-formats@2.1.1 -- \
             ajv validate \
               --spec=draft2020 \
               -s plugins.schema.json \
@@ -105,16 +114,22 @@ jobs:
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: '3.12'
 
       - name: Install test dependencies
         run: |
-          pip install -q pytest pytest-cov jsonschema
+          # Full pinned closure WITH sha256 hashes (review phlix-plugins__seceng
+          # M-07): validator tooling must never float — a hostile or broken upstream
+          # release executed by the very job that validates trust is the pwn-request
+          # class this repo exists to prevent. --require-hashes refuses ANY
+          # hash-less/changed artifact. Bumps are deliberate edits to
+          # requirements-test.txt, never silent resolution.
+          python -m pip install -q --require-hashes -r requirements-test.txt
 
       - name: Run pytest tests
         run: |
@@ -133,7 +148,7 @@ jobs:
     needs: schema
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Verify each entry's artifactSha256 matches its pinned tarball
         run: |
@@ -198,10 +213,10 @@ jobs:
     needs: schema
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Set up Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6.5.0
         with:
           node-version: '24'
           # No `cache: npm` — there is no lockfile in this repo (known landmine).
@@ -247,8 +262,9 @@ jobs:
               echo "ERROR: ${name} has no plugin.json at the repo root"
               fail=1; rm -rf "${work}"; echo "::endgroup::"; continue
             fi
-            # ajv-cli@5 (ajv v8, Draft 2020-12) + ajv-formats@2, both pinned.
-            if npx --yes --package ajv-cli@5 --package ajv-formats@2 -- \
+            # ajv-cli 5.0.0 (ajv v8, Draft 2020-12) + ajv-formats 2.1.1 — exact
+            # versions (M-07), same pins as the schema job.
+            if npx --yes --package ajv-cli@5.0.0 --package ajv-formats@2.1.1 -- \
                  ajv validate --spec=draft2020 --all-errors \
                    -s manifest.schema.json -d "${work}/plugin.json" -c ajv-formats; then
               echo "OK: ${name} manifest is valid"

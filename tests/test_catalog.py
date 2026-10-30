@@ -883,6 +883,34 @@ class TestWorkflowContract:
         ):
             assert marker in update_wf, f"trust guard vanished from updater: {marker}"
 
+    def test_ci_installs_python_deps_from_the_hash_lock(self, validate_wf, repo_root):
+        """M-07: the CI pytest job consumes requirements-test.txt with
+        --require-hashes, and the lock itself is a full exact-pinned, hash-locked
+        closure — no pin without at least one sha256."""
+        assert "pip install -q --require-hashes -r requirements-test.txt" in validate_wf
+        lock = (repo_root / "requirements-test.txt").read_text()
+        lines = [l.strip() for l in lock.splitlines() if l.strip() and not l.lstrip().startswith("#")]
+        pins = [idx for idx, l in enumerate(lines) if "==" in l]
+        assert len(pins) >= 12, "closure should pin the full transitive set"
+        for idx in pins:
+            following = lines[idx + 1] if idx + 1 < len(lines) else ""
+            assert following.startswith("--hash=sha256:"), f"requirement without hash: {lines[idx]}"
+
+    def test_all_action_uses_are_sha_pinned(self, repo_root):
+        """Every `uses:` line in both workflows is pinned to a full 40-hex commit
+        SHA (M-07 estate toolchain law): a floating major tag hands the runner to
+        whatever upstream publishes next."""
+        seen = 0
+        for wf in sorted((repo_root / ".github" / "workflows").iterdir()):
+            for i, line in enumerate(wf.read_text().splitlines(), 1):
+                m = re.search(r"^\s*-?\s*uses:\s*(\S+)", line)
+                if m is None:
+                    continue
+                seen += 1
+                ref = m.group(1).rsplit("@", 1)[-1]
+                assert re.fullmatch(r"[0-9a-f]{40}", ref), f"{wf.name}:{i}: unpinned action ref: {line.strip()}"
+        assert seen >= 8, f"expected the whole action fleet, saw {seen}"
+
     def test_catalog_gate_script_gates_both_paths(self, repo_root, update_wf, validate_wf):
         """scripts/catalog-gate.jq is the single structural source of truth: the
         blocking validate job AND the updater's pre-push step must both INVOKE it
