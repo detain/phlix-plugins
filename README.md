@@ -257,6 +257,48 @@ python3 -m pip install --require-hashes -r requirements-test.txt
 python3 -m pytest tests/ -v --tb=short --cov=. --cov-report=term-missing
 ```
 
+## Exercising the updater locally (simulation)
+
+The updater is ~900 lines of PHP living inside a YAML heredoc — deliberate (the
+PHP-first single-job law keeps it next to its trigger), but it is still fully
+runnable **off** GitHub Actions against fixtures. Extract the script, then drive
+it with the four seam variables the script itself reads:
+
+| Env var | Effect |
+|---|---|
+| `PHLIX_DISCOVERY_JSON` | JSON array of repo names — replaces the Phase A `gh api` topic search (nothing else may set it; without it, discovery hits GitHub live) |
+| `PHLIX_SKIP_FETCH` | any non-empty value — Phase B reads fixture state files instead of `gh`/`curl` |
+| `PHLIX_STATE_DIR` | where the Phase B state files AND the pristine `plugins.json` are read from (default `/tmp` — exactly what CI uses) |
+| `PHLIX_PHASE_B_ONLY` | any non-empty value — stop after Phase B, so Phase C merges can be re-run against the same captured state |
+
+```bash
+scratch=$(mktemp -d /tmp/opencode/phlix-plugins-sim.XXXXXX)
+
+# 1. extract the heredoc PHP (body indented 10 spaces inside the run step)
+sed -n "/php << 'PHPEOF'/,/^          PHPEOF\$/p" .github/workflows/update-checksums.yml \
+  | sed '1d;$d;s/^          //' > "$scratch/updater.php"
+php -l "$scratch/updater.php"
+
+# 2. fixtures: one discovered plugin pinned at a syntactically valid HEAD
+#    (state-file layout documented in the heredoc; digests may be literal test
+#    values in sim — Phase B is skipped, nothing re-hashes them)
+cp plugins.json "$scratch/plugins.json"
+printf '%s\n' "$(printf 'a%.0s' $(seq 1 40))" > "$scratch/ref_phlix-plugin-anidb.txt"
+printf '%s\n' "$(printf '0%.0s' $(seq 1 64))" > "$scratch/sha256_phlix-plugin-anidb.txt"
+printf '%s\n' '["anime","metadata"]' > "$scratch/topics_phlix-plugin-anidb.json"
+
+# 3. run the merge with GITHUB_WORKSPACE pointed at the SCRATCH copy — never
+#    the checkout — and read the rewrite back as a diff
+PHLIX_STATE_DIR="$scratch" PHLIX_SKIP_FETCH=1 PHLIX_DISCOVERY_JSON='["phlix-plugin-anidb"]' \
+  GITHUB_WORKSPACE="$scratch" php "$scratch/updater.php"
+diff "$scratch/plugins.json" plugins.json
+```
+
+A `manifest_<name>.json` fixture (the plugin's `plugin.json` at the ref) makes
+the run behave like production for the title/type/version/minServerVersion
+paths; without one, the merge SKIPs the repo at the manifest gate, which is
+itself a useful thing to see locally.
+
 ## Add your own
 
 Fork this repo (or create your own), edit `plugins.json` (keeping it valid

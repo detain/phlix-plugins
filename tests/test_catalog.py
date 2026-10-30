@@ -938,3 +938,64 @@ class TestWorkflowContract:
             capture_output=True, text=True,
         )
         assert r.returncode == 0, f"catalog gate reddens the live catalog: {r.stderr}"
+
+    def test_no_coverage_annotate_junk_is_tracked(self, repo_root):
+        """(M-PHLIX-PLUGINS-04) `coverage --cov-report=annotate` drops
+        '<file>,cover' siblings; two were committed once and stayed tracked.
+        They must not come back: untracked AND gitignored."""
+        import subprocess as sp
+        out = sp.run(["git", "ls-files"], cwd=repo_root, capture_output=True, text=True).stdout
+        junk = [line for line in out.splitlines() if line.endswith(",cover")]
+        assert not junk, f"coverage-annotate artifacts tracked again: {junk}"
+        ignore = (repo_root / ".gitignore").read_text()
+        assert "*.cover" in ignore, ".gitignore no longer excludes annotate output"
+
+    def test_readme_documents_the_updater_sim_seam(self, repo_root):
+        """(M-PHLIX-PLUGINS-05/-23) the updater's local-simulation env vars are
+        only defined inside the YAML heredoc; the README is the one place an
+        operator can actually learn them. Anti-rot pin."""
+        readme = (repo_root / "README.md").read_text()
+        assert "Exercising the updater locally" in readme
+        for var in ("PHLIX_STATE_DIR", "PHLIX_SKIP_FETCH", "PHLIX_PHASE_B_ONLY", "PHLIX_DISCOVERY_JSON"):
+            assert var in readme, f"README lost the sim-var doc for {var}"
+
+    def test_updater_pristine_read_honors_the_state_dir(self, update_wf):
+        """(M-PHLIX-PLUGINS-05) the sim seam must be COMPLETE: Phase C read the
+        pristine catalog from a hardcoded /tmp path, so PHLIX_STATE_DIR alone
+        could not exercise the updater off-CI. It must read stateDir() — and CI
+        behavior is byte-identical because stateDir() defaults to /tmp."""
+        assert "file_get_contents(stateDir() . '/plugins.json')" in update_wf
+        assert "file_get_contents('/tmp/plugins.json')" not in update_wf
+
+    def test_every_job_declares_a_timeout(self, repo_root):
+        """(M-PHLIX-PLUGINS-09) every job must bound its wall clock — a hung
+        network fetch used to sit until GitHub's own 6h runner limit. One
+        `timeout-minutes:` per `runs-on:` across both workflows."""
+        total_runs_on = total_timeout = 0
+        for wf in sorted((repo_root / ".github" / "workflows").iterdir()):
+            text = wf.read_text()
+            total_runs_on += len(re.findall(r"^\s*runs-on:", text, re.M))
+            total_timeout += len(re.findall(r"^\s*timeout-minutes:\s*\d+", text, re.M))
+        assert total_runs_on >= 5, "expected the full five-job fleet"
+        assert total_timeout == total_runs_on, (
+            f"{total_runs_on - total_timeout} job(s) run without timeout-minutes"
+        )
+
+    def test_every_tarball_fetch_is_time_bounded(self, repo_root):
+        """(M-PHLIX-PLUGINS-09) every curl that pulls catalog/manifest bytes must
+        carry --max-time — the one exception being the updater's byte-pinned
+        fetch line, which carries it too (options precede the pinned URL
+        literal, so the M-05 pin above still matches)."""
+        for wf in sorted((repo_root / ".github" / "workflows").iterdir()):
+            for i, line in enumerate(wf.read_text().splitlines(), 1):
+                if "curl -f" in line and not self._is_comment(line):
+                    assert "--max-time" in line, f"{wf.name}:{i}: unbounded fetch: {line.strip()}"
+
+    def test_updater_scratch_is_cleaned_after_capture(self, update_wf):
+        """(M-PHLIX-PLUGINS-09) fetchTargetTarball must drop the tarball and the
+        unpacked copy once digest+manifest are captured (and on every early
+        failure path) — 41 repos x 2 targets no longer accumulate in stateDir."""
+        assert update_wf.count("@unlink($tarball)") >= 5, "tarball cleanup paths missing"
+        assert update_wf.count("shell_exec('rm -rf ' . $extract)") == 2, (
+            "extract dir must be pre-cleaned AND removed after capture"
+        )

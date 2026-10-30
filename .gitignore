@@ -1,3 +1,5 @@
 .caliber/
 __pycache__/
 *.pyc
+# coverage --cov-report=annotate siblings (M-PHLIX-PLUGINS-04: two were once committed)
+*.cover

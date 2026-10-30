@@ -10,6 +10,21 @@ that record.
 
 ## Unreleased
 
+### Changed — minors campaign batch W-min84 (2026-10-30)
+- Removed the two tracked `coverage --cov-report=annotate` junk files
+  (`tests/conftest.py,cover`, `tests/test_catalog.py,cover`); `.gitignore` now
+  carries `*.cover` (M-PHLIX-PLUGINS-04).
+- Completed the updater's local-simulation seam: Phase C's pristine catalog read
+  now honors `PHLIX_STATE_DIR` (CI behavior byte-identical — it defaults to
+  `/tmp`), and the README gained an "Exercising the updater locally" section
+  documenting all four seam env vars with a verified extract-and-run recipe
+  (M-PHLIX-PLUGINS-05).
+- Resource caps + scratch hygiene (M-PHLIX-PLUGINS-09): `timeout-minutes` on all
+  five jobs across both workflows; `--max-time` on every `curl -f` fetch; the
+  updater now unlinks each fetched tarball and removes each extract dir once the
+  digest and manifest are captured (and on every early-failure path). Four new
+  workflow-contract tripwires pin all of this.
+
 ### Changed — minors campaign batch W-min82 (2026-10-30, review phlix-plugins minors)
 - README: the Plugins table now lists **every** catalog name (it carried 8 of 21;
   the whole `ui-theme` family, `phlix-plugin-example`, and the `verified: true`

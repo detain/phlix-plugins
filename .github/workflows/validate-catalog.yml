@@ -61,6 +61,7 @@ jobs:
   schema:
     name: JSON-Schema + sort/dedup
     runs-on: ubuntu-26.04
+    timeout-minutes: 10  # review seceng M-PHLIX-PLUGINS-09: bounded wall clock on every job
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
@@ -109,6 +110,7 @@ jobs:
   pytest:
     name: pytest catalog tests
     runs-on: ubuntu-26.04
+    timeout-minutes: 10  # (M-PHLIX-PLUGINS-09)
     # Runs comprehensive pytest tests against the catalog structure.
     # This job EXECUTES repo Python — never PR-authored Python from forks
     # (review phlix-plugins__seceng M-06): push events and same-repo PRs only.
@@ -139,6 +141,8 @@ jobs:
   pin-drift:
     name: Pin-drift (blocking on push)
     runs-on: ubuntu-26.04
+    # (M-PHLIX-PLUGINS-09) generous for ~41 re-hashes but far under the 6h default.
+    timeout-minutes: 20
     # Surfaces ref/artifactSha256 drift. BLOCKS pushes (a moved pin whose bytes
     # don't hash to the recorded digest must never pass silently on the trunk —
     # review phlix-plugins__seceng M-05); stays advisory on pull requests so
@@ -177,7 +181,7 @@ jobs:
             url="https://github.com/${owner_repo}/archive/${ref}.tar.gz"
             echo "::group::${name}"
             echo "url: ${url}"
-            actual="$(curl -fsSL "${url}" | sha256sum | cut -d' ' -f1)" || {
+            actual="$(curl -fsSL --max-time 120 "${url}" | sha256sum | cut -d' ' -f1)" || {
               echo "WARN: could not download ${url}"
               echo "::endgroup::"
               drift=1
@@ -205,6 +209,7 @@ jobs:
   manifest:
     name: Plugin manifest schema (blocking)
     runs-on: ubuntu-26.04
+    timeout-minutes: 20  # (M-PHLIX-PLUGINS-09)
     # BLOCKING: every pinned plugin's plugin.json must satisfy the phlix-shared
     # manifest schema — the same contract the server validates at install time
     # (PluginLoader::finalizeInstall). Prevents pinning a plugin that would fail
@@ -236,7 +241,7 @@ jobs:
           set -euo pipefail
           PHLIX_SHARED_REF='v0.52.0'
           MANIFEST_SCHEMA_SHA256='3dd7739c19a942564ee7553245695b1a8cdd07969f467dda5d513ed62a1d8430'
-          curl -fsSL --retry 3 \
+          curl -fsSL --retry 3 --max-time 30 \
             "https://raw.githubusercontent.com/detain/phlix-shared/${PHLIX_SHARED_REF}/schemas/manifest.schema.json" \
             -o manifest.schema.json
           actual="$(sha256sum manifest.schema.json | cut -d' ' -f1)"
@@ -274,7 +279,7 @@ jobs:
             url="https://github.com/${owner_repo}/archive/${ref}.tar.gz"
             echo "::group::${name} (${ref})"
             work="$(mktemp -d)"
-            if ! curl -fsSL "${url}" | tar -xz -C "${work}" --strip-components=1; then
+            if ! curl -fsSL --max-time 120 "${url}" | tar -xz -C "${work}" --strip-components=1; then
               echo "ERROR: could not download/extract ${url}"
               fail=1; rm -rf "${work}"; echo "::endgroup::"; continue
             fi

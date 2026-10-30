@@ -14,6 +14,10 @@ permissions:
 jobs:
   update-checksums:
     runs-on: ubuntu-26.04
+    # Resource caps (review phlix-plugins__seceng M-PHLIX-PLUGINS-09): the job
+    # sweeps ~40 repos x 2 tarballs + git pushes; 30 min is generous headroom
+    # and still far below GitHub's 6h default, so a hung fetch cannot squat.
+    timeout-minutes: 30
     steps:
       - name: Refuse to run outside the official repo
         # M-13: the updater is hardcoded to the detain org end to end (org-scoped
@@ -135,6 +139,9 @@ jobs:
           function stateDir(): string
           {
               // PHLIX_STATE_DIR exists only for local simulation; CI keeps /tmp.
+              // It scopes BOTH the Phase B state files and the Phase C pristine
+              // plugins.json read (M-PHLIX-PLUGINS-05: the sim seam is complete —
+              // an untouched default reproduces CI byte-for-byte).
               return envOr('PHLIX_STATE_DIR', '/tmp');
           }
 
@@ -298,8 +305,11 @@ jobs:
           function fetchTargetTarball(string $name, string $sha, string $dir, string $suffix): ?array
           {
               $tarball = $dir . '/phlix_plugin_' . $name . $suffix . '.tar.gz';
-              $effective = trim((string) shell_exec('curl -fsSL "https://github.com/detain/' . $name . '/archive/' . $sha . '.tar.gz" -o ' . $tarball . ' -w \'%{url_effective}\' 2>/dev/null'));
+              // --max-time (review seceng M-PHLIX-PLUGINS-09): a stalled CDN connection
+              // must not sit until the job timeout; 120s bounds every archive fetch.
+              $effective = trim((string) shell_exec('curl -fsSL --max-time 120 "https://github.com/detain/' . $name . '/archive/' . $sha . '.tar.gz" -o ' . $tarball . ' -w \'%{url_effective}\' 2>/dev/null'));
               if (!is_file($tarball) || filesize($tarball) <= 0) {
+                  @unlink($tarball);
                   return null;
               }
               if (!preg_match('~^https://(github\.com|codeload\.github\.com)/detain/~', $effective)) {
@@ -312,15 +322,25 @@ jobs:
                   return null;
               }
               if (!isGzipFile($tarball)) {
+                  @unlink($tarball);
                   return null;
               }
               $computed = trim((string) shell_exec('sha256sum ' . $tarball . ' | awk \'{print $1}\''));
               if (!preg_match(SHA64_RE, $computed)) {
+                  @unlink($tarball);
                   return null;
               }
               $extract = $dir . '/phlix_extract_' . $name . $suffix;
-              shell_exec('rm -rf ' . $extract . ' && mkdir -p ' . $extract . ' && tar -xzf ' . $tarball . ' -C ' . $extract . ' --strip-components=1 2>&1');
-              return ['sha256' => $computed, 'manifest' => readManifest($extract . '/plugin.json')];
+              shell_exec('rm -rf ' . $extract);
+              shell_exec('mkdir -p ' . $extract . ' && tar -xzf ' . $tarball . ' -C ' . $extract . ' --strip-components=1 2>&1');
+              $manifest = readManifest($extract . '/plugin.json');
+              // Scratch hygiene (review seceng M-PHLIX-PLUGINS-09): once the digest and
+              // the manifest are captured neither the tarball nor the unpacked copy is
+              // ever read again — drop both so ~80 fetch targets don't accumulate in
+              // stateDir during a run.
+              @unlink($tarball);
+              shell_exec('rm -rf ' . $extract);
+              return ['sha256' => $computed, 'manifest' => $manifest];
           }
 
           // ---------------------------------------------------------------------------
@@ -635,10 +655,12 @@ jobs:
 
           // ---------------------------------------------------------------------------
           // Phase C: merge fetched state into the catalog (pristine copy read from
-          // /tmp/plugins.json as fetched from GitHub in Step 3)
+          // stateDir()/plugins.json — in CI stateDir() is /tmp, where the
+          // 'Get plugins.json' step fetched it; locally it is the PHLIX_STATE_DIR
+          // sim seam, so the whole updater runs off-CI without touching /tmp)
           // ---------------------------------------------------------------------------
           try {
-              $plugins = json_decode((string) file_get_contents('/tmp/plugins.json'), true, 512, JSON_THROW_ON_ERROR);
+              $plugins = json_decode((string) file_get_contents(stateDir() . '/plugins.json'), true, 512, JSON_THROW_ON_ERROR);
           } catch (JsonException $e) {
               fwrite(STDERR, 'ERROR: plugins.json is not valid JSON: ' . $e->getMessage() . "\n");
               exit(1);
