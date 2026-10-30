@@ -15,7 +15,8 @@ name: Validate catalog
 #   4. (BLOCKING) per-entry plugin-manifest check: download each pinned tarball,
 #      extract its `plugin.json`, and validate it against the phlix-shared
 #      manifest schema — the SAME contract the Phlix server enforces at install
-#      time. This is the guardrail that stops a catalog release from pinning a
+#      time, fetched at a PINNED tag and digest-verified (never floating master).
+#      This is the guardrail that stops a catalog release from pinning a
 #      plugin the server would reject on install: an invalid `type` (must be a
 #      value from the manifest schema's enum — e.g. `metadata-provider`, NOT
 #      `metadata`), a `settings.<name>` field carrying a key the strict settings
@@ -221,13 +222,32 @@ jobs:
           node-version: '24'
           # No `cache: npm` — there is no lockfile in this repo (known landmine).
 
-      - name: Fetch the phlix-shared manifest schema
+      - name: Fetch the phlix-shared manifest schema (pinned)
         run: |
           # Canonical manifest contract, kept in phlix-shared. Draft 2020-12.
+          # M-08: this is a BLOCKING gate whose authority is the schema itself —
+          # fetching it from a FLOATING ref (master) meant any push to phlix-shared
+          # master silently redefined the install contract this job enforces. Pin
+          # to a release tag AND assert the fetched bytes hash to the digest
+          # committed below; a contract move is then a deliberate, reviewed edit
+          # (bump both ref + digest together), never silent drift. The digest is
+          # the sha256 of the file AT that tag (verified equal to the old master
+          # bytes when this pin landed — zero behavior change at pinning time).
+          set -euo pipefail
+          PHLIX_SHARED_REF='v0.52.0'
+          MANIFEST_SCHEMA_SHA256='3dd7739c19a942564ee7553245695b1a8cdd07969f467dda5d513ed62a1d8430'
           curl -fsSL --retry 3 \
-            https://raw.githubusercontent.com/detain/phlix-shared/master/schemas/manifest.schema.json \
+            "https://raw.githubusercontent.com/detain/phlix-shared/${PHLIX_SHARED_REF}/schemas/manifest.schema.json" \
             -o manifest.schema.json
-          echo "manifest schema: $(jq -r '."$schema"' manifest.schema.json)"
+          actual="$(sha256sum manifest.schema.json | cut -d' ' -f1)"
+          if [ "${actual}" != "${MANIFEST_SCHEMA_SHA256}" ]; then
+            echo "ERROR: manifest.schema.json at phlix-shared ${PHLIX_SHARED_REF} hashes to ${actual}," >&2
+            echo "       not the pinned digest ${MANIFEST_SCHEMA_SHA256}." >&2
+            echo "       Either tag contents changed after pinning, or the wrong ref was fetched." >&2
+            echo "       Refusing to validate against an unattested schema — bump ref+digest deliberately." >&2
+            exit 1
+          fi
+          echo "manifest schema: phlix-shared ${PHLIX_SHARED_REF} (${actual}) $(jq -r '."$schema"' manifest.schema.json)"
 
       - name: Validate every pinned plugin's plugin.json against the manifest schema
         run: |

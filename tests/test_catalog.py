@@ -911,6 +911,15 @@ class TestWorkflowContract:
                 assert re.fullmatch(r"[0-9a-f]{40}", ref), f"{wf.name}:{i}: unpinned action ref: {line.strip()}"
         assert seen >= 8, f"expected the whole action fleet, saw {seen}"
 
+    def test_manifest_schema_fetch_is_pinned(self, validate_wf):
+        """M-08: the BLOCKING manifest gate's schema authority must be fetched at
+        a pinned phlix-shared TAG and compared to a committed sha256 digest —
+        floating master lets upstream silently redefine the install contract."""
+        assert "phlix-shared/master/schemas" not in validate_wf
+        assert re.search(r"PHLIX_SHARED_REF='v\d+\.\d+\.\d+'", validate_wf)
+        assert re.search(r"MANIFEST_SCHEMA_SHA256='[0-9a-f]{64}'", validate_wf)
+        assert "not the pinned digest" in validate_wf
+
     def test_catalog_gate_script_gates_both_paths(self, repo_root, update_wf, validate_wf):
         """scripts/catalog-gate.jq is the single structural source of truth: the
         blocking validate job AND the updater's pre-push step must both INVOKE it
