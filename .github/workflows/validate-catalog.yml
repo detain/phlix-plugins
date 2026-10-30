@@ -59,37 +59,27 @@ jobs:
               -d plugins.json \
               -c ajv-formats
 
-      - name: Assert plugins.json is valid JSON, sorted canonically, no duplicate (name, version) pairs
+      - name: Assert plugins.json is valid JSON, canonical order/dedup, schema-shape mirror
         run: |
-          # `jq -e` already fails (exit 5) on a JSON parse error, so this step
-          # doubles as the "valid JSON" assertion. The filter then fails (via
-          # halt_error 1) if plugins.json is out of canonical order or contains duplicate
-          # (name, version) pairs. Canonical order matches the update-checksums workflow's
-          # sort comparator EXACTLY: name ascending, then dev-channel entries last within a
-          # name (the dev entry reuses the plugin name; version literal "dev" vs the semver
-          # release entry), then version ascending as a deterministic tie-break for equal
-          # names: sort_by([.name, (if .version == "dev" then 1 else 0 end), .version]) — 0 sorts before 1,
-          # so releases precede dev entries within a name, same ordering PHP produces with
-          # usort keyed (name, dev-flag, version-string). The dev channel intentionally
-          # duplicates plugin NAMES, so uniqueness is enforced on (name, version) pairs, not
-          # bare names (at most one release entry + one dev entry per plugin name per run of
-          # the workflow, by construction; this gate asserts the resulting invariant: no pair
-          # duplicated, file in canonical order).
-          jq -e -r '
-            .plugins as $p
-            | ($p | sort_by([.name, (if .version == "dev" then 1 else 0 end), .version])) as $sorted
-            | ($p | map([.name, .version])) as $pairs
-            | if ($p != $sorted) then
-                "ERROR: plugins.json is not sorted canonically (name asc, dev last within name; version tie-break).\n  got:  \($pairs | tostring)\n  want: " + (($sorted | map([.name, .version])) | tostring)
-                | halt_error(1)
-              elif (($pairs | unique) | length) != ($pairs | length) then
-                "ERROR: duplicate (name, version) pair(s): "
-                + ([$pairs[] | select(. as $kv | ([$pairs[] | select(. == $kv)] | length) > 1)] | unique | tostring)
-                | halt_error(1)
-              else
-                "OK: \($pairs | length) entries — valid JSON, canonical order (name, dev-last within name, version tie-break), no duplicate (name, version) pairs."
-              end
-          ' plugins.json
+          # Single-source structural gate (review phlix-plugins__devops M-01/M-03):
+          # scripts/catalog-gate.jq — the SAME filter the catalog updater re-runs on
+          # its computed file immediately before every bot push (GITHUB_TOKEN commits
+          # do not re-trigger this workflow, so the updater must carry the gate).
+          # `jq -e` already fails on a JSON parse error, so this step doubles as the
+          # "valid JSON" assertion; the script then halt_errors (exit 1) on an
+          # empty/non-array .plugins (vacuous-pass refusal), plugins.schema.json
+          # core-shape violations (required fields, name/ref/artifactSha256/repo/
+          # version patterns, type enum, dev-never-verified), out-of-canonical-order
+          # entries, or duplicate (name, version) pairs. Canonical order matches the
+          # update-checksums workflow's sort comparator EXACTLY: name ascending, then
+          # dev-channel entries last within a name (the dev entry reuses the plugin
+          # name; version literal "dev" vs the semver release entry), then version
+          # ascending as a deterministic tie-break — sort_by([.name, (if .version ==
+          # "dev" then 1 else 0 end), .version]), same ordering PHP produces with
+          # usort keyed (name, dev-flag, version-string). Uniqueness is enforced on
+          # (name, version) pairs, not bare names, because the dev channel
+          # intentionally duplicates plugin NAMES.
+          jq -e -r -f scripts/catalog-gate.jq plugins.json
 
   pytest:
     name: pytest catalog tests

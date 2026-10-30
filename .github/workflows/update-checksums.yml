@@ -919,6 +919,23 @@ jobs:
           }
           PHPEOF
 
+      - name: Validate catalog before push
+        if: steps.compute.outputs.changed == 'true'
+        run: |
+          # Review phlix-plugins__devops M-01: this job pushes its plugins.json rewrite
+          # with GITHUB_TOKEN, and token commits do NOT re-trigger workflows —
+          # validate-catalog.yml would never run against the bot's own commit to the
+          # trust root. So the gates travel WITH the push: re-run the canonical
+          # structural gate (the SAME scripts/catalog-gate.jq the blocking validate job
+          # runs) against the COMPUTED file in the working tree before it is committed.
+          # The ajv full-schema check is deliberately not duplicated here (keep this
+          # job's toolchain exactly as the PHP-first single-job law has it — jq is
+          # already a runner staple and this workflow's own sibling job proves the
+          # idiom); the mirror covers every field this updater can write, and it fails
+          # loud: a red here means the Push step never runs and nothing lands.
+          set -eu
+          jq -e -r -f scripts/catalog-gate.jq plugins.json
+
       - name: Push changes
         if: steps.compute.outputs.changed == 'true'
         run: |
