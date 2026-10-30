@@ -1,16 +1,17 @@
 name: Validate catalog
 
-# Validates plugins.json (the trust root the Phlix server reads) on every push
-# and pull request:
+# Validates plugins.json (the trust root the Phlix server reads) on pushes to
+# master and on pull requests:
 #   1. JSON-Schema conformance against plugins.schema.json (pinned validator).
 #   2. plugins.json is valid JSON AND entries are in canonical order (name
 #      ascending, dev-channel entries — version "dev" — last within a name, version
-#      tie-break) with no duplicate (name, version) pairs. The dev channel reuses a
-#      plugin's name, so uniqueness is keyed on (name, version), not the bare name
-#      (the "canonical order/dedup" code-quality gate).
-#   3. (non-blocking) per-entry pin-drift check: download each pinned tarball
-#      and assert its sha256 matches artifactSha256, surfacing drift without
-#      flaking PRs.
+#      tie-break) with no duplicate (name, version) pairs, plus the schema-shape
+#      mirror — all via the single-source scripts/catalog-gate.jq, which the
+#      catalog updater also runs pre-push (same gate on both paths). The dev
+#      channel reuses a plugin's name, so uniqueness is keyed on (name, version),
+#      not the bare name (the "canonical order/dedup" code-quality gate).
+#   3. (non-blocking on PRs, blocking on push) per-entry pin-drift check: download
+#      each pinned tarball and assert its sha256 matches artifactSha256.
 #   4. (BLOCKING) per-entry plugin-manifest check: download each pinned tarball,
 #      extract its `plugin.json`, and validate it against the phlix-shared
 #      manifest schema — the SAME contract the Phlix server enforces at install
@@ -21,6 +22,19 @@ name: Validate catalog
 #      schema forbids (e.g. an inert `managed` flag), a malformed `events[]`
 #      entry, etc. If any pinned manifest is invalid, CI fails.
 #
+# Trust-model containment (review phlix-plugins__seceng M-06):
+#   - Push triggers are scoped to master: a branch push elsewhere (or in a fork's
+#     remote refs visible here) does not burn the full validation fleet.
+#   - The pytest job executes REPO Python. On a fork PR, the merge ref is
+#     PR-authored code, so arbitrary attacker Python would run on our runners
+#     with the catalog checkout. pytest therefore runs on pushes and on SAME-REPO
+#     PRs only. Fork PRs still get the pure-data gates (schema job: ajv/jq
+#     validating PR bytes; pin-drift/manifest fetch pinned tarballs) — those read
+#     data, they do not execute it.
+#   - The data-driven jobs (pin-drift, manifest) take `needs: schema`, so a
+#     malformed or hostile-shape catalog is rejected BEFORE any workflow trusts
+#     jq-extracted URLs/refs from it.
+#
 # Landmines honored:
 #   - The schema uses `format: uri`, so ajv needs ajv-formats (co-installed and
 #     passed via `-c ajv-formats`), otherwise the `uri` format keyword errors.
@@ -29,6 +43,7 @@ name: Validate catalog
 
 on:
   push:
+    branches: [master]
   pull_request:
 
 permissions:
@@ -84,7 +99,10 @@ jobs:
   pytest:
     name: pytest catalog tests
     runs-on: ubuntu-26.04
-    # Runs comprehensive pytest tests against the catalog structure
+    # Runs comprehensive pytest tests against the catalog structure.
+    # This job EXECUTES repo Python — never PR-authored Python from forks
+    # (review phlix-plugins__seceng M-06): push events and same-repo PRs only.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -103,10 +121,16 @@ jobs:
           python -m pytest tests/ -v --tb=short --cov=. --cov-report=term-missing
 
   pin-drift:
-    name: Pin-drift (non-blocking)
+    name: Pin-drift (blocking on push)
     runs-on: ubuntu-26.04
-    # Surfaces ref/artifactSha256 drift without ever failing a PR.
-    continue-on-error: true
+    # Surfaces ref/artifactSha256 drift. BLOCKS pushes (a moved pin whose bytes
+    # don't hash to the recorded digest must never pass silently on the trunk —
+    # review phlix-plugins__seceng M-05); stays advisory on pull requests so
+    # external PRs don't flake on network/CDN hiccups while re-hashing 41+
+    # tarballs. Gated behind `needs: schema` (M-06): never fetch URLs minted
+    # from an unvalidated catalog.
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
+    needs: schema
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -157,7 +181,7 @@ jobs:
             exit 1
           fi
           if [ "${drift}" -ne 0 ]; then
-            echo "Pin drift detected (non-blocking). Review the entries above."
+            echo "Pin drift detected — blocking on push, advisory on PRs. Review the entries above."
             exit 1
           fi
           echo "All ${checked} pins match their tarballs."
@@ -169,6 +193,9 @@ jobs:
     # manifest schema — the same contract the server validates at install time
     # (PluginLoader::finalizeInstall). Prevents pinning a plugin that would fail
     # to install (bad `type`, forbidden `settings.*` key like `managed`, etc.).
+    # `needs: schema` (review phlix-plugins__seceng M-06): the fetch loop below
+    # builds tarball URLs from catalog data — validate the document shape first.
+    needs: schema
     steps:
       - name: Checkout
         uses: actions/checkout@v6
