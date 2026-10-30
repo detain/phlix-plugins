@@ -10,6 +10,25 @@ that record.
 
 ## Unreleased
 
+### Changed — minors campaign batch W-min86 (2026-10-30, vein final)
+- Update-checksums push trigger is `master`-only; the dead `main` entry (and the
+  README's `master`/`main` prose) implied mixed-branch semantics the updater
+  never had (M-PHLIX-PLUGINS-02).
+- The updater now names — loudly, every run — catalog entries whose repos are
+  absent from discovery. The keep-unchanged contract stands; silence was the
+  defect. Automatic `verified: false`/yank of such entries remains an owner
+  policy call (M-PHLIX-PLUGINS-11).
+- Tags are bounded three ways with one shared law — schema
+  (`items.pattern` + `maxItems: 20`), `scripts/catalog-gate.jq` mirror, and
+  `computeSyncedTags()` (charset filter + sorted-order cap, every drop WARNed
+  through `logSafe`) — so repo-topic farming can no longer mint unbounded
+  published tag lists (M-PHLIX-PLUGINS-12).
+- `minServerVersion` is now a REQUIRED entry field: an entry whose plugin
+  cannot declare a minimum server version predates the install contract. A
+  relaxed fork edits its own schema copy — the escape hatch is the fork
+  (M-PHLIX-PLUGINS-13). Six test fixtures rotated to the new law while keeping
+  each rejection discriminating on its own defect.
+
 ### Changed — minors campaign batch W-min85 (2026-10-30)
 - Updater log hygiene (M-PHLIX-PLUGINS-10): every untrusted string that reaches
   the job log now passes through a new `logSafe()` — printable-ASCII only,
