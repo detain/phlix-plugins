@@ -999,3 +999,71 @@ class TestWorkflowContract:
         assert update_wf.count("shell_exec('rm -rf ' . $extract)") == 2, (
             "extract dir must be pre-cleaned AND removed after capture"
         )
+
+    def test_updater_log_sanitizes_untrusted_strings(self, update_wf):
+        """(M-PHLIX-PLUGINS-10) Every string born outside the trust boundary — gh
+        stderr bodies, branch/tag/ref names that FAILED the SAFE_*_RE guards,
+        manifest name/type, curl's effective URL — passes through logSafe() before
+        reaching the job log: printable-ASCII only, '::' workflow-command tokens
+        defused, capped at 80 chars. Behavior independently verified against the
+        extracted heredoc on host php 8.3.6 (W-min85 report)."""
+        assert "function logSafe(string $value): string" in update_wf
+        assert "preg_replace('/[^\\x20-\\x7E]/', '', $value)" in update_wf, (
+            "logSafe must strip every byte outside printable ASCII (control-char "
+            "line-forging + non-ASCII separators)"
+        )
+        assert "str_replace('::', ': :', $value)" in update_wf, (
+            "logSafe must defuse GitHub Actions workflow-command tokens"
+        )
+        assert "strlen($value) > 80 ? substr($value, 0, 80)" in update_wf, (
+            "logSafe must cap output at 80 chars"
+        )
+        # def + 13 call sites; growth must be deliberate (rotate this pin).
+        assert update_wf.count("logSafe(") == 14, "logSafe definition/call-site count moved"
+        for pin in (
+            "(effective URL: '\" . logSafe($effective)",          # fork-guard refusal
+            "raw output follows)\\n\" . logSafe($discoveryJson)",  # discovery dump
+            "logSafe(is_string($name) ? $name : var_export($name, true))",  # pre-guard repo name
+            ": repo metadata fetch failed: ' . logSafe(trim($metaJson))",   # gh error body
+            "logSafe($metaOwner)", "logSafe($metaFullName)",                # transfer/rename echo
+            ": unsafe branch name '\" . logSafe($branch)",                  # SAFE_BRANCH_RE reject
+            ": invalid ref '\" . logSafe($sha)",                            # SHA40_RE reject
+            "fetch failed at tag '\" . logSafe($latest['name'])",           # gh-provided tag name
+            "logSafe($manifestName)",                                      # mismatch + invalid (2 sites)
+            ": manifest type '\" . logSafe($type)",                        # enum reject
+            "release entry skipped — ' . logSafe($releaseSkipReason)",     # carries tag+manifest names
+        ):
+            assert pin in update_wf, f"logSafe wrap site removed/renamed: {pin}"
+        assert update_wf.count("logSafe($manifestName)") == 2
+        assert update_wf.count("logSafe($type)") == 1
+
+    def test_robustness_contract_exit_enumeration_is_exhaustive(self, update_wf):
+        """(M-PHLIX-PLUGINS-24) The header contract must enumerate EVERY exit(1)
+        cause. Pinned inventory: state-file write, discovery, all-skipped, JSON
+        decode, shape-invalid, JSON encode, catalog write = 7 sites -> the prose
+        set (discovery / state-file write / unparseable (invalid JSON or no
+        'plugins' array) / encode / catalog write / all-skipped)."""
+        assert update_wf.count("exit(1)") == 7, "exit(1) inventory moved; reconcile the header"
+        for pin in (
+            "discovery failure, a state-file",
+            "write failure, an unparseable catalog (invalid JSON",
+            "array), a JSON encode failure, a catalog write",
+        ):
+            assert pin in update_wf, f"Robustness contract lost cause clause: {pin}"
+
+    def test_readme_uses_one_actor_noun(self, repo_root):
+        """(M-PHLIX-PLUGINS-20) The automation is 'the updater' wherever it acts.
+        'the sync job'/'a scheduled job'/'the refresh' as actors are register drift."""
+        readme = (repo_root / "README.md").read_text()
+        assert "the updater unions" in readme
+        for alias in ("the sync job", "a scheduled job", "A scheduled job", "the refresh"):
+            assert alias not in readme, f"actor-noun alias back in README: {alias!r}"
+
+    def test_readme_states_the_codeload_versus_api_digest_law(self, repo_root):
+        """(M-PHLIX-PLUGINS-21) The README pin recipe must carry the law that
+        api.github.com tarballs are DIFFERENT bytes from the codeload archive form
+        — previously it lived only in a workflow comment, and the mix-up poisoned
+        every pin once."""
+        readme = (repo_root / "README.md").read_text()
+        assert "api.github.com/repos/<owner>/<repo>/tarball" in readme
+        assert "**different bytes**" in readme

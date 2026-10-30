@@ -80,8 +80,9 @@ jobs:
           //
           // Robustness contract: one malformed repo must never kill the job — every
           // per-repo failure prints "SKIP <name>: reason" and continues with the next
-          // repo. The script exits 1 only for: discovery failure, an unparseable
-          // catalog, a JSON encode failure, a catalog write failure, or a run where
+          // repo. The script exits 1 only for: discovery failure, a state-file
+          // write failure, an unparseable catalog (invalid JSON or no 'plugins'
+          // array), a JSON encode failure, a catalog write failure, or a run where
           // every discovered repo was skipped/failed. Entries are never removed except
           // stale release entries (same name as a plugin with tags, version != "dev" &&
           // != latest tag version); entries of plugins absent from discovery are never
@@ -134,6 +135,19 @@ jobs:
           {
               $value = getenv($key);
               return ($value === false || trim($value) === '') ? $default : trim($value);
+          }
+
+          // Log-sanitize untrusted strings (seceng M-PHLIX-PLUGINS-10): anything born
+          // outside our trust boundary — gh stderr bodies, branch/tag/ref names that
+          // FAILED the SAFE_*_RE guards, manifest-sourced name/type, curl's effective
+          // URL — still reaches the job log. Printable ASCII only (line-forging control
+          // characters and non-ASCII separators cannot survive), '::' workflow-command
+          // tokens defused, output capped at 80 chars.
+          function logSafe(string $value): string
+          {
+              $value = preg_replace('/[^\x20-\x7E]/', '', $value) ?? '';
+              $value = str_replace('::', ': :', $value);
+              return strlen($value) > 80 ? substr($value, 0, 80) . '...' : $value;
           }
 
           function stateDir(): string
@@ -316,7 +330,7 @@ jobs:
                   // The artifact left detain ownership (repo transferred/renamed and the
                   // redirect chain followed) — refuse to hash or pin it. Names the WHY on
                   // stderr; the caller's SKIP line names the fetch failure.
-                  fwrite(STDERR, 'ERROR: tarball for ' . $name . '@' . substr($sha, 0, 12) . " redirected outside detain ownership (effective URL: '" . $effective . "') — refusing\n");
+                  fwrite(STDERR, 'ERROR: tarball for ' . $name . '@' . substr($sha, 0, 12) . " redirected outside detain ownership (effective URL: '" . logSafe($effective) . "') — refusing\n");
                   echo 'TRUST ' . $name . ": fetch left detain ownership — refusing artifact\n";
                   @unlink($tarball);
                   return null;
@@ -488,7 +502,7 @@ jobs:
           }
           $repos = json_decode($discoveryJson, true);
           if (!is_array($repos) || count($repos) === 0) {
-              fwrite(STDERR, "ERROR: discovery returned no repos (broken search/token? raw output follows)\n" . $discoveryJson . "\n");
+              fwrite(STDERR, "ERROR: discovery returned no repos (broken search/token? raw output follows)\n" . logSafe($discoveryJson) . "\n");
               exit(1);
           }
           echo 'Discovered ' . count($repos) . " candidate repo(s)\n";
@@ -500,7 +514,7 @@ jobs:
           $state = [];
           foreach ($repos as $name) {
               if (!is_string($name) || !preg_match(PLUGIN_NAME_RE, $name)) {
-                  echo 'SKIP ' . (is_string($name) ? $name : var_export($name, true)) . ": invalid repo name\n";
+                  echo 'SKIP ' . logSafe(is_string($name) ? $name : var_export($name, true)) . ": invalid repo name\n";
                   continue;
               }
 
@@ -556,7 +570,7 @@ jobs:
               $metaJson = trim((string) shell_exec('gh api repos/detain/' . $name . ' --jq \'{default_branch: .default_branch, topics: .topics, owner: .owner.login, full_name: .full_name}\' 2>&1'));
               $meta = json_decode($metaJson, true);
               if (!is_array($meta) || !isset($meta['default_branch']) || !is_string($meta['default_branch'])) {
-                  echo 'SKIP ' . $name . ': repo metadata fetch failed: ' . trim($metaJson) . "\n";
+                  echo 'SKIP ' . $name . ': repo metadata fetch failed: ' . logSafe(trim($metaJson)) . "\n";
                   continue;
               }
               // M-04 (review phlix-plugins__seceng): gh silently follows repo TRANSFERS —
@@ -566,14 +580,14 @@ jobs:
               $metaOwner = isset($meta['owner']) && is_string($meta['owner']) ? $meta['owner'] : '';
               $metaFullName = isset($meta['full_name']) && is_string($meta['full_name']) ? $meta['full_name'] : '';
               if ($metaOwner !== 'detain' || $metaFullName !== 'detain/' . $name) {
-                  echo 'SKIP ' . $name . ": repo no longer detain-owned at this name (owner='" . $metaOwner . "' full_name='" . $metaFullName . "') — transfer/rename redirect detected\n";
+                  echo 'SKIP ' . $name . ": repo no longer detain-owned at this name (owner='" . logSafe($metaOwner) . "' full_name='" . logSafe($metaFullName) . "') — transfer/rename redirect detected\n";
                   continue;
               }
               $branch = $meta['default_branch'] === '' ? 'master' : $meta['default_branch'];
               // Branch names legally allow ; $ ` & | quotes and parens — a hostile default
               // branch must never reach a shell string. Gate before use.
               if (!preg_match(SAFE_BRANCH_RE, $branch)) {
-                  echo 'SKIP ' . $name . ": unsafe branch name '" . $branch . "'\n";
+                  echo 'SKIP ' . $name . ": unsafe branch name '" . logSafe($branch) . "'\n";
                   continue;
               }
               $topics = [];
@@ -583,7 +597,7 @@ jobs:
 
               $sha = trim((string) shell_exec('gh api repos/detain/' . $name . '/commits/' . $branch . ' --jq \'.sha\' 2>&1'));
               if (!preg_match(SHA40_RE, $sha)) {
-                  echo 'SKIP ' . $name . ": invalid ref '" . $sha . "'\n";
+                  echo 'SKIP ' . $name . ": invalid ref '" . logSafe($sha) . "'\n";
                   continue;
               }
 
@@ -616,7 +630,7 @@ jobs:
                   $latest = $tags[0];
                   $release = fetchTargetTarball($name, $latest['sha'], $dir, '_tagged');
                   if ($release === null) {
-                      echo 'SKIP ' . $name . ": release tarball fetch failed at tag '" . $latest['name'] . "' — keeping dev entry only\n";
+                      echo 'SKIP ' . $name . ": release tarball fetch failed at tag '" . logSafe($latest['name']) . "' — keeping dev entry only\n";
                   } else {
                       $stateEntry['tagged'] = [
                           'name' => $latest['name'],
@@ -714,16 +728,16 @@ jobs:
               }
               $manifestName = isset($manifest['name']) && is_string($manifest['name']) ? $manifest['name'] : $name;
               if ($manifestName !== $name) {
-                  echo 'SKIP ' . $name . ": manifest name '" . $manifestName . "' does not match repo name\n";
+                  echo 'SKIP ' . $name . ": manifest name '" . logSafe($manifestName) . "' does not match repo name\n";
                   continue;
               }
               if (!preg_match(PLUGIN_NAME_RE, $manifestName)) {
-                  echo 'SKIP ' . $name . ": manifest name '" . $manifestName . "' is not a valid plugin name\n";
+                  echo 'SKIP ' . $name . ": manifest name '" . logSafe($manifestName) . "' is not a valid plugin name\n";
                   continue;
               }
               $type = isset($manifest['type']) && is_string($manifest['type']) ? $manifest['type'] : '';
               if (!in_array($type, CATALOG_TYPES, true)) {
-                  echo 'SKIP ' . $name . ": manifest type '" . $type . "' not representable in catalog enum\n";
+                  echo 'SKIP ' . $name . ": manifest type '" . logSafe($type) . "' not representable in catalog enum\n";
                   continue;
               }
 
@@ -807,7 +821,7 @@ jobs:
                       }
                   }
                   if ($releaseSkipReason !== null) {
-                      echo 'SKIP ' . $name . ': release entry skipped — ' . $releaseSkipReason . " (keeping dev entry only)\n";
+                      echo 'SKIP ' . $name . ': release entry skipped — ' . logSafe($releaseSkipReason) . " (keeping dev entry only)\n";
                   } else {
                       $releaseType = (isset($tagManifest['type']) && is_string($tagManifest['type']) && in_array($tagManifest['type'], CATALOG_TYPES, true))
                           ? $tagManifest['type']

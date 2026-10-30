@@ -10,6 +10,24 @@ that record.
 
 ## Unreleased
 
+### Changed — minors campaign batch W-min85 (2026-10-30)
+- Updater log hygiene (M-PHLIX-PLUGINS-10): every untrusted string that reaches
+  the job log now passes through a new `logSafe()` — printable-ASCII only,
+  GitHub Actions `::` workflow-command tokens defused, capped at 80 chars.
+  Wrapped sites: discovery-failure raw dump, gh metadata error body,
+  transfer/rename owner/full_name echo, rejected branch/ref echoes, tag name on
+  release-fetch failure, manifest name/type rejections, the release-skip reason,
+  the pre-guard invalid-repo-name echo, and the fork-guard effective-URL refusal.
+- README: the pin recipe now states the codeload-versus-API digest law (the
+  `api.github.com` tarball endpoint serves different bytes — the mix-up poisoned
+  every pin once) next to the "recompute the digest" step
+  (M-PHLIX-PLUGINS-21), and the automation is called by one actor noun, "the
+  updater" (M-PHLIX-PLUGINS-20).
+- Workflow header: the Robustness contract now enumerates all seven `exit(1)`
+  causes including state-file write failure and the shape-invalid catalog
+  (M-PHLIX-PLUGINS-24). Three new tripwire tests pin the sanitizer call sites,
+  the exit inventory and both README laws.
+
 ### Changed — minors campaign batch W-min84 (2026-10-30)
 - Removed the two tracked `coverage --cov-report=annotate` junk files
   (`tests/conftest.py,cover`, `tests/test_catalog.py,cover`); `.gitignore` now

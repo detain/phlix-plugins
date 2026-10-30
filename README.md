@@ -121,7 +121,7 @@ Per-**entry** fields (each object in `plugins`):
 | `deprecationMessage` | no | Human-readable message shown for deprecated/yanked entries. |
 | `summary` / `description` | no | Short / long description. |
 | `author` | no | Catalog-declared author/owner. |
-| `tags` | no | Free-form tags; the sync job unions repo topics (minus a dynamic majority-family denylist **and** an owner-curated static floor such as `media-server`/`plex`/`composer-package`) with curated tags (minus the static floor only). |
+| `tags` | no | Free-form tags; the updater unions repo topics (minus a dynamic majority-family denylist **and** an owner-curated static floor such as `media-server`/`plex`/`composer-package`) with curated tags (minus the static floor only). |
 
 The official catalog is the trust root: any change to a `ref` is a reviewable
 git diff, so a malicious silent rewrite of an install target is visible in
@@ -203,6 +203,14 @@ sha=$(curl -sL https://github.com/detain/phlix-plugin-<x>/archive/$ref.tar.gz | 
 # 3. read the plugin's semver at that ref (from its plugin.json) and update
 #    "ref", "artifactSha256" and "version" together in plugins.json
 ```
+
+Compute `artifactSha256` **only** from the archive-form tarball shown in step 2 —
+`https://github.com/<owner>/<repo>/archive/<ref>.tar.gz`. GitHub's *API* tarball
+endpoint (`https://api.github.com/repos/<owner>/<repo>/tarball/<ref>`) serves
+**different bytes** for the same commit, so its digest never matches a
+codeload-based pin and bumping with it poisons the entry (this exact mix-up
+poisoned every pin in the catalog once; CI's pin-drift job hashes the
+archive form).
 
 Never bump `ref` without recomputing `artifactSha256` (and vice versa); CI
 validates shape, sort order and every pinned plugin's `plugin.json` manifest,
