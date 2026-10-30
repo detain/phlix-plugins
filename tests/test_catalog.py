@@ -224,7 +224,7 @@ class TestServerVersion:
 class TestRequiredFields:
     """Tests for required fields on each plugin."""
 
-    REQUIRED_FIELDS = {"name", "title", "type", "repo", "ref", "artifactSha256", "version"}
+    REQUIRED_FIELDS = {"name", "title", "type", "repo", "ref", "artifactSha256", "version", "minServerVersion"}
 
     def test_all_required_fields_present(self, plugins):
         """Every plugin must have all required fields."""
@@ -443,10 +443,11 @@ class TestEdgeCases:
             "repo": "https://github.com/detain/phlix-plugin-minimal",
             "ref": "a" * 40,
             "artifactSha256": "b" * 64,
-            "version": "0.1.0"
+            "version": "0.1.0",
+            "minServerVersion": "1.0.0"
         }
         # This should satisfy all required field checks
-        required_fields = {"name", "title", "type", "repo", "ref", "artifactSha256", "version"}
+        required_fields = {"name", "title", "type", "repo", "ref", "artifactSha256", "version", "minServerVersion"}
         for field in required_fields:
             assert field in plugin
 
@@ -465,6 +466,7 @@ class TestSchemaValidation:
             "ref": "a" * 40,
             "artifactSha256": "b" * 64,
             "version": "1.0.0",
+            "minServerVersion": "1.0.0",
             "unknownField": "should be rejected"
         }
         catalog = {
@@ -476,7 +478,9 @@ class TestSchemaValidation:
             jsonschema.validate(catalog, schema_json)
 
     def test_schema_accepts_valid_minimal_plugin(self, schema_json):
-        """Schema should accept a valid minimal plugin."""
+        """Schema should accept a valid minimal plugin. The minimal set grew to
+        include minServerVersion (seceng M-PHLIX-PLUGINS-13): declaring the
+        minimum server version IS the install contract."""
         import jsonschema
         valid_plugin = {
             "name": "phlix-plugin-valid",
@@ -485,7 +489,8 @@ class TestSchemaValidation:
             "repo": "https://github.com/detain/phlix-plugin-valid",
             "ref": "a" * 40,
             "artifactSha256": "b" * 64,
-            "version": "1.0.0"
+            "version": "1.0.0",
+            "minServerVersion": "1.0.0"
         }
         catalog = {
             "schemaVersion": 2,
@@ -505,7 +510,8 @@ class TestSchemaValidation:
             "repo": "https://github.com/detain/phlix-plugin-valid",
             "ref": "a" * 40,
             "artifactSha256": "b" * 64,
-            "version": "dev"
+            "version": "dev",
+            "minServerVersion": "1.0.0"
         }
         catalog = {"schemaVersion": 2, "name": "Test Catalog", "plugins": [dev_plugin]}
         jsonschema.validate(catalog, schema_json)
@@ -522,7 +528,8 @@ class TestSchemaValidation:
                 "repo": "https://github.com/detain/phlix-plugin-invalid",
                 "ref": "a" * 40,
                 "artifactSha256": "b" * 64,
-                "version": bad_version
+                "version": bad_version,
+                "minServerVersion": "1.0.0"
             }
             catalog = {"schemaVersion": 2, "name": "Test Catalog", "plugins": [plugin]}
             with pytest.raises(jsonschema.ValidationError):
@@ -533,7 +540,8 @@ class TestSchemaValidation:
             "type": "metadata-provider",
             "repo": "https://github.com/detain/phlix-plugin-invalid",
             "ref": "a" * 40,
-            "artifactSha256": "b" * 64
+            "artifactSha256": "b" * 64,
+            "minServerVersion": "1.0.0"
         }
         catalog = {"schemaVersion": 2, "name": "Test Catalog", "plugins": [plugin]}
         with pytest.raises(jsonschema.ValidationError):
@@ -549,7 +557,8 @@ class TestSchemaValidation:
             "repo": "https://github.com/detain/phlix-plugin-bad-type",
             "ref": "a" * 40,
             "artifactSha256": "b" * 64,
-            "version": "1.0.0"
+            "version": "1.0.0",
+            "minServerVersion": "1.0.0"
         }
         catalog = {
             "schemaVersion": 2,
@@ -698,7 +707,8 @@ class TestCatalogOperations:
                     "repo": "https://github.com/detain/phlix-plugin-single",
                     "ref": "a" * 40,
                     "artifactSha256": "b" * 64,
-                    "version": "1.0.0"
+                    "version": "1.0.0",
+                    "minServerVersion": "1.0.0"
                 }
             ]
         }
@@ -736,6 +746,53 @@ class TestCatalogOperations:
         }
         jsonschema.validate(catalog, schema_json)
 
+
+    def test_schema_requires_min_server_version(self, schema_json):
+        """(M-PHLIX-PLUGINS-13) minServerVersion is a REQUIRED entry field: an entry
+        for a plugin that cannot declare a minimum server version predates the
+        install contract. The forked-catalog escape hatch is editing the fork's
+        own schema copy — never shipping official entries without the field."""
+        import jsonschema
+        plugin = {
+            "name": "phlix-plugin-valid",
+            "title": "Valid Plugin",
+            "type": "metadata-provider",
+            "repo": "https://github.com/detain/phlix-plugin-valid",
+            "ref": "a" * 40,
+            "artifactSha256": "b" * 64,
+            "version": "1.0.0",
+        }
+        catalog = {"schemaVersion": 2, "name": "Test Catalog", "plugins": [plugin]}
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(catalog, schema_json)
+
+    def test_schema_bounds_tags(self, schema_json):
+        """(M-PHLIX-PLUGINS-12) tags carry the topic-style charset (lowercase alnum
+        start/end, interior [._-], max 50) and a per-entry count bound of 20, so
+        repo-topic farming cannot mint unbounded published tag lists."""
+        import jsonschema
+        base = {
+            "name": "phlix-plugin-valid",
+            "title": "Valid Plugin",
+            "type": "metadata-provider",
+            "repo": "https://github.com/detain/phlix-plugin-valid",
+            "ref": "a" * 40,
+            "artifactSha256": "b" * 64,
+            "version": "1.0.0",
+            "minServerVersion": "1.0.0",
+        }
+
+        def build(tags):
+            plugin = dict(base, tags=tags)
+            return {"schemaVersion": 2, "name": "Test Catalog", "plugins": [plugin]}
+
+        good = ["a", "media-server", "php8.4", "x" * 50]
+        jsonschema.validate(build(good), schema_json)
+        for bad in ["A-uppercase", "UPPER", "dot.", "-lead", "trail-", "a" * 51, "spaced out", ""]:
+            with pytest.raises(jsonschema.ValidationError):
+                jsonschema.validate(build([bad]), schema_json)
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(build([f"t{i}" for i in range(21)]), schema_json)
 
 class TestOriginalMethodsWithOptionalFields:
     """Tests that invoke original test methods with optional fields present.
@@ -802,6 +859,10 @@ class TestWorkflowContract:
     @pytest.fixture
     def validate_wf(self, repo_root):
         return (repo_root / ".github" / "workflows" / "validate-catalog.yml").read_text()
+
+    @pytest.fixture
+    def gate(self, repo_root):
+        return (repo_root / "scripts" / "catalog-gate.jq").read_text()
 
     @staticmethod
     def _is_comment(line: str) -> bool:
@@ -1018,8 +1079,10 @@ class TestWorkflowContract:
         assert "strlen($value) > 80 ? substr($value, 0, 80)" in update_wf, (
             "logSafe must cap output at 80 chars"
         )
-        # def + 13 call sites; growth must be deliberate (rotate this pin).
-        assert update_wf.count("logSafe(") == 14, "logSafe definition/call-site count moved"
+        # def + 15 call sites (W-min85: 13; W-min86 tag-charset WARNs: +2); growth
+        # must be deliberate (rotate this pin). The -11 undiscovered-summary uses
+        # array_map('logSafe', ...) — callable-by-name, not counted here.
+        assert update_wf.count("logSafe(") == 16, "logSafe definition/call-site count moved"
         for pin in (
             "(effective URL: '\" . logSafe($effective)",          # fork-guard refusal
             "raw output follows)\\n\" . logSafe($discoveryJson)",  # discovery dump
@@ -1067,3 +1130,59 @@ class TestWorkflowContract:
         readme = (repo_root / "README.md").read_text()
         assert "api.github.com/repos/<owner>/<repo>/tarball" in readme
         assert "**different bytes**" in readme
+
+    def test_push_triggers_are_master_only(self, repo_root):
+        """(M-PHLIX-PLUGINS-02) Both workflows trigger on pushes to `master` ONLY —
+        the repo has no `main` branch, and the updater reads default branches of
+        DETAIN repos, so a mixed-branch trigger implied semantics that never
+        existed. (M-PHLIX-PLUGINS-15 shares this law: the validate job's push
+        trigger must stay filtered too.)"""
+        for wf in ("update-checksums.yml", "validate-catalog.yml"):
+            text = (repo_root / ".github" / "workflows" / wf).read_text()
+            assert "branches: [master]" in text, f"{wf}: push trigger not master-only"
+            assert "main, master" not in text and "master, main" not in text, f"{wf}: dead main lingers"
+        readme = (repo_root / "README.md").read_text()
+        assert "`master`/`main`" not in readme
+
+    def test_updater_and_schema_and_gate_agree_on_the_tag_contract(self, repo_root, update_wf, schema_json):
+        """(M-PHLIX-PLUGINS-12) Three-way byte-consistency for the tag bounds:
+        schema (ajv, authoritative), catalog-gate.jq (PHP-first mirror) and the
+        updater's computeSyncedTags defensive filter must state the SAME pattern
+        and the SAME count bound — drift would let the updater write a catalog
+        its own gate rejects."""
+        import json as _json
+        schema = _json.loads((repo_root / "plugins.schema.json").read_text())
+        assert schema["properties"]["plugins"]["items"] == {"$ref": "#/$defs/plugin"}
+        tags = schema["$defs"]["plugin"]["properties"]["tags"]
+        gate = (repo_root / "scripts" / "catalog-gate.jq").read_text()
+        php_re = "^[a-z0-9](?:[a-z0-9._-]{0,48}[a-z0-9])?$"
+        assert tags["items"]["pattern"] == php_re
+        assert tags["maxItems"] == 20
+        assert f'def TAG_RE: "{php_re}";' in gate
+        assert "def TAG_MAX: 20;" in gate
+        assert ".tags | length) > TAG_MAX" in gate and "test(TAG_RE)" in gate
+        assert "const CATALOG_TAG_RE = '/^[a-z0-9](?:[a-z0-9._-]{0,48}[a-z0-9])?$/';" in update_wf
+        assert "const CATALOG_TAG_MAX = 20;" in update_wf
+        assert "preg_match(CATALOG_TAG_RE, $topic)" in update_wf and "preg_match(CATALOG_TAG_RE, $tag)" in update_wf
+        assert "array_slice($list, 0, CATALOG_TAG_MAX)" in update_wf
+
+    def test_schema_requires_min_server_version_everywhere(self, repo_root, schema_json, gate):
+        """(M-PHLIX-PLUGINS-13) required list + gate mirror + README admission agree."""
+        import json as _json
+        schema = _json.loads((repo_root / "plugins.schema.json").read_text())
+        assert "minServerVersion" in schema["$defs"]["plugin"]["required"]
+        assert 'badstr("minServerVersion"; SEMVER)' in gate
+        readme = (repo_root / "README.md").read_text()
+        row = [line for line in readme.splitlines() if line.startswith("| `minServerVersion`")][0]
+        assert "| yes |" in row
+
+    def test_updater_announces_undiscovered_entries(self, update_wf):
+        """(M-PHLIX-PLUGINS-11) Entries of plugins absent from discovery are kept
+        (contract unchanged) but must be NAMED loudly on every run — silence let
+        vanished repos rot unreviewed. Auto verified:false/yank stays an owner
+        policy call, so the updater must NOT mutate anything here."""
+        i = update_wf.index("catalog entry name(s) absent from discovery")
+        j = update_wf.index("usort($plugins['plugins']")
+        assert i < j, "the undiscovered WARN must run before the final sort/write"
+        assert "array_filter($repos, 'is_string')" in update_wf, "discovery keys must be string-guarded"
+        assert "array_map('logSafe', array_keys($undiscovered))" in update_wf

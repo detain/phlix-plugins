@@ -10,8 +10,10 @@
 #   * plugins.json is unparseable (jq itself exits non-zero on bad JSON),
 #   * .plugins is missing/not an array/EMPTY — a zero-entry loop is never a
 #     validation (vacuous-pass refusal, review phlix-plugins__devops M-03),
-#   * an entry violates the plugins.schema.json core shape: required fields,
-#     name/ref/artifactSha256/repo/version patterns, type enum, and the
+#   * an entry violates the plugins.schema.json core shape: required fields
+#     (minServerVersion included, M-PHLIX-PLUGINS-13),
+#     name/ref/artifactSha256/repo/version patterns, type enum, the tags
+#     charset/count bounds (M-PHLIX-PLUGINS-12), and the
 #     dev-entries-are-never-verified law,
 #   * entries are out of canonical order (name asc, dev last within name,
 #     version tie-break — byte-equivalent to the update-checksums PHP usort
@@ -28,6 +30,8 @@ def VERSION: "^(?:dev|" + (SEMVER[1:-1]) + ")$";
 def TYPES: ["metadata-provider","scrobbler","subtitle-provider","notifier","player","integration","ui-theme"];
 def NAME_RE: "^phlix-plugin-[a-z0-9][a-z0-9-]*$";
 def REPO_RE: "^https://github\\.com/detain/phlix-plugin-[a-z0-9][a-z0-9-]*/?$";
+def TAG_RE: "^[a-z0-9](?:[a-z0-9._-]{0,48}[a-z0-9])?$";
+def TAG_MAX: 20;
 def badstr($f; $re): (getpath([$f]) | (type == "string" and test($re)) | not);
 
 .plugins as $p
@@ -45,7 +49,13 @@ def badstr($f; $re): (getpath([$f]) | (type == "string" and test($re)) | not);
     or badstr("ref"; "^[0-9a-f]{40}$")
     or badstr("artifactSha256"; "^[0-9a-f]{64}$")
     or badstr("version"; VERSION)
+    or badstr("minServerVersion"; SEMVER)
     or (.version == "dev" and .verified == true)
+    or ((.tags != null) and (
+          ((.tags | type) != "array")
+          or ((.tags | length) > TAG_MAX)
+          or (([.tags[] | (type == "string" and test(TAG_RE))] | all) | not)
+        ))
   ))) as $bad
 | if ($bad | length) > 0 then
     "ERROR: " + (($bad | length) | tostring) + " malformed entry(ies): "

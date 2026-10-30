@@ -35,7 +35,7 @@
   "$defs": {
     "plugin": {
       "type": "object",
-      "required": ["name", "title", "type", "repo", "ref", "artifactSha256", "version"],
+      "required": ["name", "title", "type", "repo", "ref", "artifactSha256", "version", "minServerVersion"],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -91,7 +91,7 @@
           "pattern": "^(?:dev|(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-(?:(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+[0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*)?)$"
         },
         "minServerVersion": {
-          "description": "Minimum Phlix server version the plugin declares (from its plugin.json phlix_min_server_version at the pinned ref). Catalog metadata only: the current server does NOT include this field in its catalog wire shape and does not gate the admin UI before download — it enforces compatibility at install time from the plugin's own manifest (PluginLoader::satisfiesServerVersion).",
+          "description": "Minimum Phlix server version the plugin declares (from its plugin.json phlix_min_server_version at the pinned ref). REQUIRED (seceng M-PHLIX-PLUGINS-13): a plugin that cannot declare a minimum server version predates the install contract and must not occupy the official catalog. The escape hatch for a relaxed forked catalog is editing that fork's own copy of this schema — not shipping entries without the field. Enforcement status unchanged: catalog metadata only — the current server does NOT include this field in its catalog wire shape and does not gate the admin UI before download; it enforces compatibility at install time from the plugin's own manifest (PluginLoader::satisfiesServerVersion).",
           "type": "string",
           "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-(?:(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+[0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*)?$"
         },
@@ -121,9 +121,13 @@
           "type": "string"
         },
         "tags": {
-          "description": "Optional free-form tags.",
+          "description": "Optional free-form tags, bounded to mirror the updater's tag-sync and the catalog gate (seceng M-PHLIX-PLUGINS-12): every tag is lowercase-alphanumeric start/end with interior [._-] (GitHub's topic charset plus '.'), at most 48 interior chars, and at most 20 tags per entry — so tag farming by a repo adding bulk topics cannot mint an unbounded published tag list.",
           "type": "array",
-          "items": { "type": "string" }
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,48}[a-z0-9])?$"
+          }
         }
       }
     }

@@ -113,7 +113,7 @@ Per-**entry** fields (each object in `plugins`):
 | `ref` | yes | 40-char lowercase commit sha the entry is **pinned** to (not a branch/tag). |
 | `artifactSha256` | yes | Bare 64-hex sha256 of `…/archive/<ref>.tar.gz` (no `sha256:` prefix). |
 | `version` | yes | Semver at the pinned `ref` (from its `plugin.json`), or the literal `"dev"` for a plugin's dev-channel entry (HEAD of the default branch — re-pinned every catalog refresh, always `verified: false`). A plugin normally appears as a release entry plus, once the updater has seen it, a `dev` entry with the same `name` — **at most two entries per name**. The pairing can lawfully degrade to **dev-only**: a repo with no usable semver tag, or whose latest tag fails the install-contract gate (invalid/missing `plugin.json` at the tag), is kept as a dev entry while its release entry is skipped (the updater logs `SKIP <name>: release entry skipped … keeping dev entry only`). |
-| `minServerVersion` | no | Minimum Phlix server version the plugin declares (from its `phlix_min_server_version` at the pinned `ref`). **Catalog metadata only:** the current server does not include this field in its catalog wire shape and does not pre-gate the admin UI with it — it enforces compatibility at install time, after download, from the plugin's own manifest (`PluginLoader::satisfiesServerVersion`). |
+| `minServerVersion` | yes | Minimum Phlix server version the plugin declares (from its `phlix_min_server_version` at the pinned `ref`) — **required** since M-PHLIX-PLUGINS-13: an entry whose plugin cannot declare it predates the install contract and does not belong in the official catalog (a relaxed fork edits its own schema copy — that is the escape hatch). **Catalog metadata only:** the current server does not include this field in its catalog wire shape and does not pre-gate the admin UI with it — it enforces compatibility at install time, after download, from the plugin's own manifest (`PluginLoader::satisfiesServerVersion`). |
 | `maxServerVersion` | no | Maximum Phlix server version supported (exclusive upper bound). Same metadata-only status as `minServerVersion`. |
 | `verified` | no | Whether this entry has been reviewed by the catalog maintainer. Un-verified entries are install-blocked by the server in default-deny mode. Dev-channel entries are always `false`; auto-discovered entries start `false`. The updater RESETS a carried `true` to `false` as a re-attestation event whenever an auto pin move is not a fast-forward of the previously pinned commit, or a tag is recreated (same version, different commit). |
 | `deprecated` | no | Whether this plugin is deprecated. Deprecated entries may still be installable but the server warns operators. |
@@ -121,7 +121,7 @@ Per-**entry** fields (each object in `plugins`):
 | `deprecationMessage` | no | Human-readable message shown for deprecated/yanked entries. |
 | `summary` / `description` | no | Short / long description. |
 | `author` | no | Catalog-declared author/owner. |
-| `tags` | no | Free-form tags; the updater unions repo topics (minus a dynamic majority-family denylist **and** an owner-curated static floor such as `media-server`/`plex`/`composer-package`) with curated tags (minus the static floor only). |
+| `tags` | no | Bounded tags (lowercase-alnum `[._-]` charset, max 20 per entry — M-PHLIX-PLUGINS-12); the updater unions repo topics (minus a dynamic majority-family denylist **and** an owner-curated static floor such as `media-server`/`plex`/`composer-package`) with curated tags (minus the static floor only). |
 
 The official catalog is the trust root: any change to a `ref` is a reviewable
 git diff, so a malicious silent rewrite of an install target is visible in
@@ -165,7 +165,7 @@ moved.
   along fast-forward lineage — a recreated tag (same version, new commit) or a
   non-ancestor pin move resets it to `false` (re-attestation, see the workflow
   header). New auto-discovered entries start `verified: false`.
-- **Triggers:** a 6-hourly cron, a push to `master`/`main`, and manual
+- **Triggers:** a 6-hourly cron, a push to `master` (the only branch), and manual
   `repository_dispatch` of type `plugin-push` (the payload is never read — a
   dispatch just means "run now").
 - **Shape:** one PHP-first job (`shell_exec` of `gh`/`curl`/`sha256sum` — no

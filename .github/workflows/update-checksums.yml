@@ -4,7 +4,11 @@ on:
   repository_dispatch:
     types: [plugin-push]
   push:
-    branches: [main, master]
+    # master is the only branch this catalog repo has (M-PHLIX-PLUGINS-02): a dead
+    # `main` entry here implied mixed-branch semantics the updater never had —
+    # discovery reads detain-owned repos' DEFAULT branches, and validate-catalog
+    # triggers on [master] alone.
+    branches: [master]
   schedule:
     - cron: '0 */6 * * *'
 
@@ -76,7 +80,8 @@ jobs:
           //        - dev entry: pinned to default-branch HEAD; version literal "dev"
           //      Tags sync: per-plugin tags = union(repo topics minus the family
           //      denylist [dynamic majority + static floor], curated tags minus the
-          //      static floor), applied to both entries.
+          //      static floor), applied to both entries; bounded by the catalog tag
+          //      charset/count (schema-mirrored) — overflow dropped with a loud WARN.
           //
           // Robustness contract: one malformed repo must never kill the job — every
           // per-repo failure prints "SKIP <name>: reason" and continues with the next
@@ -93,6 +98,11 @@ jobs:
           const SAFE_TAG_RE = '/^[A-Za-z0-9._\/-]+$/';
           const SHA40_RE = '/^[0-9a-f]{40}$/';
           const SHA64_RE = '/^[0-9a-f]{64}$/';
+          // Catalog tag bounds (seceng M-PHLIX-PLUGINS-12) — kept byte-equivalent to
+          // plugins.schema.json's tags.items.pattern/maxItems and the catalog-gate.jq
+          // mirror, so the updater can never WRITE a catalog its own gate rejects.
+          const CATALOG_TAG_RE = '/^[a-z0-9](?:[a-z0-9._-]{0,48}[a-z0-9])?$/';
+          const CATALOG_TAG_MAX = 20;
           const SEMVER_RE = '/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/';
           const DEV_VERSION = 'dev';
           const CATALOG_TYPES = [
@@ -386,20 +396,42 @@ jobs:
           function computeSyncedTags(array $topics, array $curatedTags, array $dynamicDenylist, array $staticDenylist): array
           {
               $out = [];
+              $dropped = 0;
               foreach ($topics as $topic) {
                   if (!is_string($topic) || $topic === '') continue;
                   $lower = strtolower($topic);
                   // topic-derived: dropped by the static floor OR the dynamic majority rule
                   if (isset($staticDenylist[$lower]) || isset($dynamicDenylist[$lower])) continue;
+                  // Defensive bound (M-PHLIX-PLUGINS-12): repo topics are attacker-
+                  // supplied — a topic becomes a published catalog tag, so anything
+                  // outside the schema's tag charset is dropped loudly, never written.
+                  if (!preg_match(CATALOG_TAG_RE, $topic)) {
+                      $dropped++;
+                      echo 'WARN: topic ' . logSafe($topic) . " outside catalog tag charset — dropped\n";
+                      continue;
+                  }
                   $out[$topic] = true;
               }
               foreach (array_keys($curatedTags) as $tag) {
                   // curated: dropped ONLY by the static floor — the dynamic majority rule
                   // must never strip human curation (established curation-preservation).
                   if (is_string($tag) && isset($staticDenylist[strtolower($tag)])) continue;
+                  if (is_string($tag) && !preg_match(CATALOG_TAG_RE, $tag)) {
+                      $dropped++;
+                      echo 'WARN: curated tag ' . logSafe($tag) . " outside catalog tag charset — dropped (M-PHLIX-PLUGINS-12)\n";
+                      continue;
+                  }
                   $out[$tag] = true;
               }
-              return normalizeTags(array_keys($out));
+              $list = normalizeTags(array_keys($out));
+              if (count($list) > CATALOG_TAG_MAX) {
+                  // Farming bound (M-PHLIX-PLUGINS-12): the schema caps entries at
+                  // CATALOG_TAG_MAX tags; keep the first N in canonical (sorted) order
+                  // and say so — silently exceeding the bound would fail the gate.
+                  echo 'WARN: ' . count($list) . ' synced tags exceed the catalog maximum of ' . CATALOG_TAG_MAX . ' — keeping the first ' . CATALOG_TAG_MAX . " in sorted order\n";
+                  $list = array_slice($list, 0, CATALOG_TAG_MAX);
+              }
+              return $list;
           }
 
           function carryVerified(array $entriesWithName): bool
@@ -1019,6 +1051,25 @@ jobs:
                   if (!isset($removeIndexes[$i])) $kept[] = $entry;
               }
               $plugins['plugins'] = $kept;
+          }
+
+          // Loud retention accounting (seceng M-PHLIX-PLUGINS-11): entries of plugins
+          // absent from discovery are NEVER touched — the header contract stands — but
+          // keeping them silently let a vanished/renamed repo rot in the catalog
+          // unreviewed. Name every retained-undiscovered entry on EVERY run (changed
+          // or not); an automatic verified:false/yank is an owner policy call the
+          // updater must not make unasked.
+          $discovered = array_flip(array_values(array_filter($repos, 'is_string')));
+          $undiscovered = [];
+          foreach ($plugins['plugins'] as $entry) {
+              $entryName = is_array($entry) ? ($entry['name'] ?? null) : null;
+              if (is_string($entryName) && !isset($discovered[$entryName])) {
+                  $undiscovered[$entryName] = true;
+              }
+          }
+          if ($undiscovered !== []) {
+              echo 'WARN: ' . count($undiscovered) . " catalog entry name(s) absent from discovery — kept unchanged per contract; review each for yank/verified-reset (M-PHLIX-PLUGINS-11): "
+                  . implode(', ', array_map('logSafe', array_keys($undiscovered))) . "\n";
           }
 
           usort($plugins['plugins'], static function (array $a, array $b): int {
