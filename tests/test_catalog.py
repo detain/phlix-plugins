@@ -14,9 +14,14 @@ in the README and enforced by CI:
 7. artifactSha256 format
 8. Version format: "dev" (dev-channel) or semver (release)
 9. Required fields present
+10. Workflow-contract tripwires: laws that live inside the CI YAML (codeload
+    URL idiom, updater regex constants, push-blocking pin-drift, trust-boundary
+    guards, shared catalog gate) — see TestWorkflowContract
 """
 import json
 import re
+import shutil
+import subprocess
 import pytest
 import jsonschema
 
@@ -776,3 +781,123 @@ class TestOriginalMethodsWithOptionalFields:
         # Instantiate the original test class and call the method directly
         test_instance = TestOptionalFields()
         test_instance.test_deprecation_message_is_string_if_present([plugin_with_deprecation])
+
+
+class TestWorkflowContract:
+    """Executable tripwires for the laws that live INSIDE the workflow YAML.
+
+    The codeload-hash law (this repo's own poisoning incident: api.github.com
+    tarballs are DIFFERENT bytes for the same commit — review
+    phlix-plugins__seceng M-05), the trust-boundary guards (M-04) and the
+    shared catalog gate (M-01) all live in a PHP heredoc / shell step that no
+    test otherwise imports. These tests pin the law text byte-exactly and
+    re-derive its pure semantics in python, so a refactor cannot silently drop
+    them. (review phlix-plugins__seceng M-05)
+    """
+
+    @pytest.fixture
+    def update_wf(self, repo_root):
+        return (repo_root / ".github" / "workflows" / "update-checksums.yml").read_text()
+
+    @pytest.fixture
+    def validate_wf(self, repo_root):
+        return (repo_root / ".github" / "workflows" / "validate-catalog.yml").read_text()
+
+    @staticmethod
+    def _is_comment(line: str) -> bool:
+        s = line.lstrip()
+        return s.startswith("#") or s.startswith("//") or s.startswith("*")
+
+    def test_every_tarball_fetch_line_uses_the_archive_idiom(self, repo_root):
+        """Every non-comment line constructing a .tar.gz URL (http-bearing) must use
+        github.com/.../archive/<ref>.tar.gz — the ONLY byte form the
+        artifactSha256 contract is computed over. (The updater's local temp-file
+        paths carry .tar.gz too — they are filenames, not fetch URLs.)"""
+        for wf in sorted((repo_root / ".github" / "workflows").iterdir()):
+            for i, line in enumerate(wf.read_text().splitlines(), 1):
+                if ".tar.gz" in line and "http" in line and not self._is_comment(line):
+                    assert "archive/" in line, f"{wf.name}:{i}: tarball URL not codeload archive idiom: {line.strip()}"
+
+    def test_no_api_github_com_tarball_consumption(self, repo_root):
+        """api.github.com may only appear in law-documenting comments — never on a
+        line that fetches/consumes a tarball (those bytes hash differently and
+        previously poisoned every pin)."""
+        for wf in sorted((repo_root / ".github" / "workflows").iterdir()):
+            for i, line in enumerate(wf.read_text().splitlines(), 1):
+                if "api.github.com" in line:
+                    assert self._is_comment(line), f"{wf.name}:{i}: api.github.com outside a comment: {line.strip()}"
+
+    def test_codeload_law_text_is_carried(self, update_wf):
+        """The heredoc must keep explaining WHY the codeload form is law."""
+        assert "api.github.com tarball" in update_wf
+        assert "DIFFERENT bytes" in update_wf
+
+    def test_updater_fetch_line_is_byte_pinned(self, update_wf):
+        """The single canonical fetch construction; move it and this test reddens
+        — reviewers must see the URL-shape change deliberately."""
+        assert ('''"https://github.com/detain/' . $name . '/archive/' . $sha . '.tar.gz"''') in update_wf
+
+    def test_schema_artifact_digest_describes_the_archive_form(self, schema_json):
+        desc = schema_json["$defs"]["plugin"]["properties"]["artifactSha256"]["description"]
+        assert "archive/<ref>.tar.gz" in desc
+
+    def test_updater_regex_constants_are_pinned(self, update_wf):
+        """The gates between hostile repo data and shell/URL interpolation, pinned
+        byte-for-byte (devops m10: SAFE_BRANCH_RE once missed () and `; a widened
+        charset here is a shell-injection surface, never an editorial tweak)."""
+        for const_line in (
+            r"const PLUGIN_NAME_RE = '/^phlix-plugin-[a-z0-9][a-z0-9-]*$/';",
+            r"const SAFE_BRANCH_RE = '/^[A-Za-z0-9][A-Za-z0-9._\/-]*$/';",
+            r"const SAFE_TAG_RE = '/^[A-Za-z0-9._\/-]+$/';",
+            r"const SHA40_RE = '/^[0-9a-f]{40}$/';",
+            r"const SHA64_RE = '/^[0-9a-f]{64}$/';",
+        ):
+            assert const_line in update_wf, f"missing/bent constant: {const_line}"
+
+    def test_branch_name_rejects_shell_metacharacters(self):
+        """Behavioural mirror of SAFE_BRANCH_RE: names that could break out of a
+        shell string are refused."""
+        branch_re = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
+        for ok in ("master", "main", "feature/x-1.2_3"):
+            assert branch_re.match(ok), ok
+        for bad in ("main;id", "feat`whoami`", "a$b", "a|b", "a'b", "a(b)", "a&&b", " lead"):
+            assert not branch_re.match(bad), bad
+
+    def test_pin_drift_checker_blocks_pushes(self, validate_wf):
+        """The re-hashing cross-check must never be blanket non-blocking again
+        (M-05): advisory on PRs only, blocking on push."""
+        assert "continue-on-error: ${{ github.event_name == 'pull_request' }}" in validate_wf
+        assert "continue-on-error: true" not in validate_wf
+
+    def test_trust_boundary_guards_are_carried(self, update_wf):
+        """M-04 guards: effective-URL ownership assertion, org assertion on repo
+        metadata, and the compare-API lineage decision (fail-closed)."""
+        for marker in (
+            "%{url_effective}",
+            "codeload\\.github\\.com)/detain/",
+            ".owner.login",
+            "full_name",
+            "/compare/",
+            "function releaseLineageOk",
+            "function reattestedVerified",
+        ):
+            assert marker in update_wf, f"trust guard vanished from updater: {marker}"
+
+    def test_catalog_gate_script_gates_both_paths(self, repo_root, update_wf, validate_wf):
+        """scripts/catalog-gate.jq is the single structural source of truth: the
+        blocking validate job AND the updater's pre-push step must both INVOKE it
+        (byte-pinned command line, not a comment mention), and it must PASS on the
+        live catalog (jq exit 0)."""
+        invoke = "jq -e -r -f scripts/catalog-gate.jq plugins.json"
+        assert invoke in update_wf, "updater pre-push no longer invokes the catalog gate"
+        assert invoke in validate_wf, "validate job no longer invokes the catalog gate"
+        script = repo_root / "scripts" / "catalog-gate.jq"
+        assert script.is_file()
+        jq = shutil.which("jq")
+        if jq is None:  # pragma: no cover - ubuntu runners ship jq; the sibling job fails loudly without it
+            pytest.skip("jq binary unavailable in this venue")
+        r = subprocess.run(
+            [jq, "-e", "-r", "-f", str(script), str(repo_root / "plugins.json")],
+            capture_output=True, text=True,
+        )
+        assert r.returncode == 0, f"catalog gate reddens the live catalog: {r.stderr}"
