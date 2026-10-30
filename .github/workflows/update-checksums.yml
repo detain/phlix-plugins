@@ -273,13 +273,27 @@ jobs:
           // per the schema) and validate-catalog.yml hashes. The api.github.com tarball
           // endpoint produces DIFFERENT bytes for the same commit. -f makes HTTP errors
           // fail instead of saving an error body; the gzip-magic check below remains the
-          // backstop. Returns ['sha256' => string, 'manifest' => ?array] or null.
+          // backstop. -L is REQUIRED (github.com answers an archive request with a
+          // redirect to codeload) but blind redirect-following is exactly how a
+          // TRANSFERRED/renamed repo silently swaps artifact provenance, so the
+          // effective URL is captured and must still be detain-owned before anything
+          // is hashed (review phlix-plugins__seceng M-04). Returns
+          // ['sha256' => string, 'manifest' => ?array] or null.
           // ---------------------------------------------------------------------------
           function fetchTargetTarball(string $name, string $sha, string $dir, string $suffix): ?array
           {
               $tarball = $dir . '/phlix_plugin_' . $name . $suffix . '.tar.gz';
-              shell_exec('curl -fsSL "https://github.com/detain/' . $name . '/archive/' . $sha . '.tar.gz" -o ' . $tarball . ' 2>&1');
+              $effective = trim((string) shell_exec('curl -fsSL "https://github.com/detain/' . $name . '/archive/' . $sha . '.tar.gz" -o ' . $tarball . ' -w \'%{url_effective}\' 2>/dev/null'));
               if (!is_file($tarball) || filesize($tarball) <= 0) {
+                  return null;
+              }
+              if (!preg_match('~^https://(github\.com|codeload\.github\.com)/detain/~', $effective)) {
+                  // The artifact left detain ownership (repo transferred/renamed and the
+                  // redirect chain followed) — refuse to hash or pin it. Names the WHY on
+                  // stderr; the caller's SKIP line names the fetch failure.
+                  fwrite(STDERR, 'ERROR: tarball for ' . $name . '@' . substr($sha, 0, 12) . " redirected outside detain ownership (effective URL: '" . $effective . "') — refusing\n");
+                  echo 'TRUST ' . $name . ": fetch left detain ownership — refusing artifact\n";
+                  @unlink($tarball);
                   return null;
               }
               if (!isGzipFile($tarball)) {
@@ -381,6 +395,55 @@ jobs:
           }
 
           // ---------------------------------------------------------------------------
+          // Trust-boundary helpers (review phlix-plugins__seceng M-04)
+          // ---------------------------------------------------------------------------
+
+          // 'verified: true' is an ATTESTATION that the maintainer reviewed the artifact
+          // lineage behind an entry. GitHub tags can be deleted/recreated and history
+          // force-pushed, so a ref move is only a routine roll-forward when the new pin
+          // CONTAINS the old one. The compare API answers exactly that: with
+          // base=<old>...head=<new>, status 'ahead' (or 'identical') proves old is an
+          // ancestor of new — a legitimate advance; 'diverged'/'behind'/'unknown' (or a
+          // failed call) break the attested chain. Anything not provably fast-forward is
+          // treated as lineage-broken — fail closed on trust, never open.
+          function releaseLineageOk(string $name, string $oldRef, string $newRef): bool
+          {
+              if (!preg_match(SHA40_RE, $oldRef) || !preg_match(SHA40_RE, $newRef)) {
+                  return false;
+              }
+              if ($oldRef === $newRef) {
+                  return true;
+              }
+              $status = trim((string) shell_exec('gh api repos/detain/' . $name . '/compare/' . $oldRef . '...' . $newRef . " --jq '.status' 2>&1"));
+              return $status === 'ahead' || $status === 'identical';
+          }
+
+          // Pure trust decision, unit-testable in isolation: should a verified attestation
+          // survive a moved pin? Returns [keepVerified(bool), reason(?string)]; the first
+          // element is only consulted when a reason comes back non-null (reset), and the
+          // caller applies it only when the entry actually WAS verified and the pin moved.
+          //   * SAME (name, version) with a different commit = a RECREATED TAG. A published
+          //     semver version is supposed to be immutable; its artifact changed under the
+          //     audience, so this is always a trust event — reset, lineage not consulted;
+          //   * version roll-forward with broken/unknown lineage → reset (a rewrite or a
+          //     non-descendant tag carries no inherited trust);
+          //   * version roll-forward with fast-forward lineage → keeps (the standing
+          //     roll-forward law, curated text carry untouched).
+          function reattestedVerified(bool $wasVerified, bool $pinMoved, bool $sameVersionRepin, bool $lineageOk): array
+          {
+              if (!$wasVerified || !$pinMoved) {
+                  return [true, null];
+              }
+              if ($sameVersionRepin) {
+                  return [false, 'tag recreated — same version, different commit (semver immutability trust event)'];
+              }
+              if (!$lineageOk) {
+                  return [false, 'lineage broken — old ref is not an ancestor of the new pin (force-push/rewrite?)'];
+              }
+              return [true, null];
+          }
+
+          // ---------------------------------------------------------------------------
           // Phase A: discover candidate repos (topic search scoped to the detain org)
           // ---------------------------------------------------------------------------
           $discoveryJson = getenv('PHLIX_DISCOVERY_JSON');
@@ -455,10 +518,20 @@ jobs:
               // repo metadata (default branch + topics) — one gh call, parsed explicitly in
               // PHP (fail fast, never shell-mangle JSON); individual repo meta failures SKIP
               // the repo only (stale entries for it are left untouched).
-              $metaJson = trim((string) shell_exec('gh api repos/detain/' . $name . ' --jq \'{default_branch: .default_branch, topics: .topics}\' 2>&1'));
+              $metaJson = trim((string) shell_exec('gh api repos/detain/' . $name . ' --jq \'{default_branch: .default_branch, topics: .topics, owner: .owner.login, full_name: .full_name}\' 2>&1'));
               $meta = json_decode($metaJson, true);
               if (!is_array($meta) || !isset($meta['default_branch']) || !is_string($meta['default_branch'])) {
                   echo 'SKIP ' . $name . ': repo metadata fetch failed: ' . trim($metaJson) . "\n";
+                  continue;
+              }
+              // M-04 (review phlix-plugins__seceng): gh silently follows repo TRANSFERS —
+              // the meta endpoint answers for the canonical post-rename repo. A plugin
+              // repo that left detain (or was renamed out from under this discovery hit)
+              // must never be (re)pinned into the official catalog by its old name.
+              $metaOwner = isset($meta['owner']) && is_string($meta['owner']) ? $meta['owner'] : '';
+              $metaFullName = isset($meta['full_name']) && is_string($meta['full_name']) ? $meta['full_name'] : '';
+              if ($metaOwner !== 'detain' || $metaFullName !== 'detain/' . $name) {
+                  echo 'SKIP ' . $name . ": repo no longer detain-owned at this name (owner='" . $metaOwner . "' full_name='" . $metaFullName . "') — transfer/rename redirect detected\n";
                   continue;
               }
               $branch = $meta['default_branch'] === '' ? 'master' : $meta['default_branch'];
@@ -708,11 +781,17 @@ jobs:
 
                       if ($existingIndex !== null && is_array($plugins['plugins'][$existingIndex])) {
                           // In-place upsert: (name, version) already in the catalog —
-                          // refresh the pin and metadata; verified/summary/description
-                          // (curated fields) stay untouched. Log/change ONLY if the entry
-                          // actually differs (idempotency: a second run must be a no-op).
+                          // refresh the pin and metadata; summary/description/title
+                          // (curated TEXT) always stay untouched. 'verified' is not plain
+                          // curation, it is an attestation: when the pin MOVES under an
+                          // already-published version (recreated tag) it resets to false
+                          // for re-attestation (review phlix-plugins__seceng M-04); a
+                          // stationary refresh — the normal idempotent case — keeps it.
+                          // Log/change ONLY if the entry actually differs (idempotency: a
+                          // second run must be a no-op).
                           $oldEntry = $plugins['plugins'][$existingIndex];
                           $entry = $oldEntry;
+                          $upsertOldRef = isset($oldEntry['ref']) && is_string($oldEntry['ref']) ? $oldEntry['ref'] : '';
                           $entry['ref'] = $tagged['sha'];
                           $entry['artifactSha256'] = $tagged['sha256'];
                           $entry['type'] = $releaseType;
@@ -720,6 +799,13 @@ jobs:
                           $entry['repo'] = 'https://github.com/detain/' . $name;
                           $entry['minServerVersion'] = $tagMinServer;
                           $entry['tags'] = $syncedTags;
+                          if (($entry['verified'] ?? false) === true && $upsertOldRef !== $tagged['sha']) {
+                              [$carryOk, $trustNote] = reattestedVerified(true, true, true, true);
+                              if ($carryOk === false) {
+                                  $entry['verified'] = false;
+                                  echo 'TRUST ' . $name . '@' . $tagVersion . ': ' . $trustNote . " — verified reset to false for re-attestation\n";
+                              }
+                          }
                           if ($entry !== $oldEntry) {
                               $oldSha = isset($oldEntry['artifactSha256']) && is_string($oldEntry['artifactSha256']) ? $oldEntry['artifactSha256'] : '';
                               $oldRef = isset($oldEntry['ref']) && is_string($oldEntry['ref']) ? $oldEntry['ref'] : '';
@@ -735,17 +821,36 @@ jobs:
                           }
                       } else {
                           // New release entry (first tag, or roll-forward to a newer tag).
-                          // The OLD release entry (different version) is removed below;
-                          // curated trust and curated text carry over so a version bump
-                          // never resets verification.
+                          // The OLD release entry (different version) is removed below.
+                          // Curated TEXT carries over so a version bump never loses
+                          // curation; curated TRUST carries over ONLY along provably
+                          // fast-forward lineage (review phlix-plugins__seceng M-04) —
+                          // a broken or unverifiable lineage resets verified to false
+                          // instead of inheriting the attestation.
                           $oldEntries = [];
                           foreach ($plugins['plugins'] as $entry) {
                               if (($entry['name'] ?? '') === $name) $oldEntries[] = $entry;
                           }
+                          $oldReleaseRef = '';
                           foreach ($oldEntries as $oldEntry) {
-                              if (($oldEntry['version'] ?? '') !== DEV_VERSION) { $oldVersion = $oldEntry['version']; break; }
+                              if (($oldEntry['version'] ?? '') !== DEV_VERSION) {
+                                  $oldVersion = $oldEntry['version'];
+                                  $oldReleaseRef = isset($oldEntry['ref']) && is_string($oldEntry['ref']) ? $oldEntry['ref'] : '';
+                                  break;
+                              }
                           }
                           $carriedVerified = carryVerified($oldEntries);
+                          // Fixture/skip runs call no gh and never push, so the lineage
+                          // check is live-mode only; its absence there is not silent —
+                          // real checks announce TRUST lines when they fire.
+                          if ($carriedVerified === true && $oldReleaseRef !== '' && $oldReleaseRef !== $tagged['sha'] && !skipFetch()) {
+                              $lineageOk = releaseLineageOk($name, $oldReleaseRef, $tagged['sha']);
+                              [$carryOk, $trustNote] = reattestedVerified(true, true, false, $lineageOk);
+                              if ($carryOk === false) {
+                                  $carriedVerified = false;
+                                  echo 'TRUST ' . $name . ': ' . ($oldVersion ?? '?') . ' -> ' . $tagVersion . ': ' . $trustNote . " — verified reset to false for re-attestation\n";
+                              }
+                          }
                           $entry = [
                               'name' => $name,
                               'title' => pickTitle(null, $entriesForName, $name),
