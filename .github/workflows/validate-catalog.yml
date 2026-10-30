@@ -124,10 +124,24 @@ jobs:
       - name: Verify each entry's artifactSha256 matches its pinned tarball
         run: |
           set -u
+          # Input guard (review phlix-plugins__devops M-03): the loop below is fed by a
+          # process substitution, so a jq crash or an unparseable/empty plugins.json
+          # would feed it ZERO lines and the job would 'pass' having validated nothing.
+          # Parse+non-empty up front, then prove coverage: checked must equal total.
+          total="$(jq -e '.plugins | length' plugins.json 2>/dev/null)" || {
+            echo "ERROR: plugins.json is missing or unparseable — pin-drift cannot assert anything" >&2
+            exit 1
+          }
+          if [ "${total}" -lt 1 ]; then
+            echo "ERROR: plugins.json has zero entries — refusing vacuous pin-drift pass" >&2
+            exit 1
+          fi
           drift=0
+          checked=0
           # owner/repo are derived from the entry `repo` URL; ref + expected
           # digest come straight from the catalog.
           while IFS=$'\t' read -r name repo ref expected; do
+            checked=$((checked + 1))
             owner_repo="${repo#https://github.com/}"
             owner_repo="${owner_repo%/}"
             url="https://github.com/${owner_repo}/archive/${ref}.tar.gz"
@@ -148,11 +162,15 @@ jobs:
             echo "::endgroup::"
           done < <(jq -r '.plugins[] | [.name, .repo, .ref, .artifactSha256] | @tsv' plugins.json)
 
+          if [ "${checked}" -ne "${total}" ]; then
+            echo "ERROR: pin-drift visited ${checked} of ${total} catalog entries — coverage is not vacuous by luck" >&2
+            exit 1
+          fi
           if [ "${drift}" -ne 0 ]; then
             echo "Pin drift detected (non-blocking). Review the entries above."
             exit 1
           fi
-          echo "All pins match their tarballs."
+          echo "All ${checked} pins match their tarballs."
 
   manifest:
     name: Plugin manifest schema (blocking)
@@ -182,8 +200,24 @@ jobs:
       - name: Validate every pinned plugin's plugin.json against the manifest schema
         run: |
           set -u
+          # Input guard (review phlix-plugins__devops M-03): this is the BLOCKING gate
+          # that promises 'If any pinned manifest is invalid, CI fails' — but the loop
+          # was fed by a process substitution, so a jq crash / unparseable / empty
+          # plugins.json yielded ZERO iterations and exit 0 (vacuous pass). Parse and
+          # demand a non-empty catalog up front, and after the loop require that every
+          # entry was actually visited.
+          total="$(jq -e '.plugins | length' plugins.json 2>/dev/null)" || {
+            echo "ERROR: plugins.json is missing or unparseable — manifest gate cannot assert anything" >&2
+            exit 1
+          }
+          if [ "${total}" -lt 1 ]; then
+            echo "ERROR: plugins.json has zero entries — refusing vacuous manifest pass" >&2
+            exit 1
+          fi
           fail=0
+          checked=0
           while IFS=$'\t' read -r name repo ref; do
+            checked=$((checked + 1))
             owner_repo="${repo#https://github.com/}"; owner_repo="${owner_repo%/}"
             url="https://github.com/${owner_repo}/archive/${ref}.tar.gz"
             echo "::group::${name} (${ref})"
@@ -209,8 +243,12 @@ jobs:
             echo "::endgroup::"
           done < <(jq -r '.plugins[] | [.name, .repo, .ref] | @tsv' plugins.json)
 
+          if [ "${checked}" -ne "${total}" ]; then
+            echo "ERROR: manifest gate validated ${checked} of ${total} catalog entries — refusing a coverage-incomplete pass" >&2
+            exit 1
+          fi
           if [ "${fail}" -ne 0 ]; then
             echo "One or more pinned plugin manifests are invalid — the server would reject them at install. Refusing to pin."
             exit 1
           fi
-          echo "All pinned plugin manifests satisfy the manifest schema."
+          echo "All ${checked} pinned plugin manifests satisfy the manifest schema."
