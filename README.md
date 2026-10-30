@@ -12,16 +12,37 @@ another catalog URL, or paste a single plugin repo URL directly.
 
 ## Plugins
 
-| Plugin | Type | Version | Min Server | Repo |
-|---|---|---|---|---|
-| AniDB | metadata-provider | 0.3.0 | ≥ 1.2.0 | [phlix-plugin-anidb](https://github.com/detain/phlix-plugin-anidb) |
-| AniList | metadata-provider | 0.2.0 | ≥ 1.2.0 | [phlix-plugin-anilist](https://github.com/detain/phlix-plugin-anilist) |
-| Last.fm | scrobbler | 1.1.0 | ≥ 1.2.0 | [phlix-plugin-lastfm](https://github.com/detain/phlix-plugin-lastfm) |
-| MusicBrainz | metadata-provider | 0.2.0 | ≥ 1.2.0 | [phlix-plugin-musicbrainz](https://github.com/detain/phlix-plugin-musicbrainz) |
-| MyAnimeList | metadata-provider | 0.2.0 | ≥ 1.2.0 | [phlix-plugin-myanimelist](https://github.com/detain/phlix-plugin-myanimelist) |
-| OMDb | metadata-provider | 0.2.0 | ≥ 1.2.0 | [phlix-plugin-omdb](https://github.com/detain/phlix-plugin-omdb) |
-| OpenSubtitles | subtitle-provider | 0.2.0 | ≥ 1.2.0 | [phlix-plugin-opensubtitles](https://github.com/detain/phlix-plugin-opensubtitles) |
-| Trakt | scrobbler | 1.2.0 | ≥ 1.2.0 | [phlix-plugin-trakt](https://github.com/detain/phlix-plugin-trakt) |
+The catalog currently carries **21 plugin names / 41 entries** — a name normally
+appears twice (a semver `release` entry plus a `"dev"` twin, see the `version`
+field below; the dev twins are omitted from the table). This table mirrors the
+release entries of [`plugins.json`](plugins.json) **at this commit** — that file
+is the source of truth, and remember `master` is not operator-live until a
+catalog release tag is cut
+([Publishing a catalog release](#publishing-a-catalog-release-what-servers-actually-read)).
+
+| Plugin | Type | Release | Min Server | Verified | Repo |
+|---|---|---|---|---|---|
+| AniDB | `metadata-provider` | 0.3.0 | ≥ 1.2.0 | true | [phlix-plugin-anidb](https://github.com/detain/phlix-plugin-anidb) |
+| AniList | `metadata-provider` | 0.2.0 | ≥ 1.2.0 | true | [phlix-plugin-anilist](https://github.com/detain/phlix-plugin-anilist) |
+| Arctic Jade Theme | `ui-theme` | 1.0.0 | ≥ 0.44.0 | false | [phlix-plugin-arctic-jade-theme](https://github.com/detain/phlix-plugin-arctic-jade-theme) |
+| Emerald Abyss Theme | `ui-theme` | 1.0.0 | ≥ 0.44.0 | false | [phlix-plugin-emerald-abyss-theme](https://github.com/detain/phlix-plugin-emerald-abyss-theme) |
+| Example | `metadata-provider` | 0.1.1 | ≥ 0.10.0 | false | [phlix-plugin-example](https://github.com/detain/phlix-plugin-example) |
+| Jade Theme | `ui-theme` | 1.0.0 | ≥ 0.44.0 | false | [phlix-plugin-jade-theme](https://github.com/detain/phlix-plugin-jade-theme) |
+| Last.fm | `scrobbler` | 1.1.0 | ≥ 1.2.0 | true | [phlix-plugin-lastfm](https://github.com/detain/phlix-plugin-lastfm) |
+| MusicBrainz | `metadata-provider` | 0.2.0 | ≥ 1.2.0 | true | [phlix-plugin-musicbrainz](https://github.com/detain/phlix-plugin-musicbrainz) |
+| MyAnimeList | `metadata-provider` | 0.2.0 | ≥ 1.2.0 | true | [phlix-plugin-myanimelist](https://github.com/detain/phlix-plugin-myanimelist) |
+| Mystic Jade Theme | `ui-theme` | 1.0.0 | ≥ 0.44.0 | false | [phlix-plugin-mystic-jade-theme](https://github.com/detain/phlix-plugin-mystic-jade-theme) |
+| Obsidian Flame Theme | `ui-theme` | 1.0.0 | ≥ 0.44.0 | false | [phlix-plugin-obsidian-flame-theme](https://github.com/detain/phlix-plugin-obsidian-flame-theme) |
+| OMDb | `metadata-provider` | 0.2.0 | ≥ 1.2.0 | true | [phlix-plugin-omdb](https://github.com/detain/phlix-plugin-omdb) |
+| OpenSubtitles | `subtitle-provider` | 0.2.0 | ≥ 1.2.0 | true | [phlix-plugin-opensubtitles](https://github.com/detain/phlix-plugin-opensubtitles) |
+| Phantom Mint | `ui-theme` | 1.0.0 | ≥ 0.44.0 | false | [phlix-plugin-phantom-mint](https://github.com/detain/phlix-plugin-phantom-mint) |
+| Phantom Mint Theme | `ui-theme` | — (dev-only) | ≥ 0.44.0 | false | [phlix-plugin-phantom-mint-theme](https://github.com/detain/phlix-plugin-phantom-mint-theme) |
+| Phantom Violet Theme | `ui-theme` | 1.0.0 | ≥ 0.44.0 | false | [phlix-plugin-phantom-violet-theme](https://github.com/detain/phlix-plugin-phantom-violet-theme) |
+| Sample Theme | `ui-theme` | 1.0.0 | ≥ 0.44.0 | true | [phlix-plugin-sample-theme](https://github.com/detain/phlix-plugin-sample-theme) |
+| Spectral Dusk Theme | `ui-theme` | 1.0.0 | ≥ 0.44.0 | false | [phlix-plugin-spectral-dusk-theme](https://github.com/detain/phlix-plugin-spectral-dusk-theme) |
+| Trakt | `scrobbler` | 1.2.0 | ≥ 1.2.0 | true | [phlix-plugin-trakt](https://github.com/detain/phlix-plugin-trakt) |
+| Void Bloom Theme | `ui-theme` | 1.0.0 | ≥ 0.44.0 | false | [phlix-plugin-void-bloom-theme](https://github.com/detain/phlix-plugin-void-bloom-theme) |
+| Volcanic Ember Theme | `ui-theme` | 1.0.0 | ≥ 0.44.0 | false | [phlix-plugin-volcanic-ember-theme](https://github.com/detain/phlix-plugin-volcanic-ember-theme) |
 
 ## Catalog format (`plugins.json`)
 
@@ -77,7 +98,7 @@ moving branch.
 | `repo` | yes | Human repo URL the plugin lives at (`github.com/detain/phlix-plugin-*`). |
 | `ref` | yes | 40-char lowercase commit sha the entry is **pinned** to (not a branch/tag). |
 | `artifactSha256` | yes | Bare 64-hex sha256 of `…/archive/<ref>.tar.gz` (no `sha256:` prefix). |
-| `version` | yes | Semver at the pinned `ref` (from its `plugin.json`), or the literal `"dev"` for a plugin's dev-channel entry (HEAD of the default branch — re-pinned every catalog refresh, always `verified: false`). A plugin appears as a release entry plus, once the refresh has seen it, a `dev` entry with the same `name`. |
+| `version` | yes | Semver at the pinned `ref` (from its `plugin.json`), or the literal `"dev"` for a plugin's dev-channel entry (HEAD of the default branch — re-pinned every catalog refresh, always `verified: false`). A plugin normally appears as a release entry plus, once the updater has seen it, a `dev` entry with the same `name` — **at most two entries per name**. The pairing can lawfully degrade to **dev-only**: a repo with no usable semver tag, or whose latest tag fails the install-contract gate (invalid/missing `plugin.json` at the tag), is kept as a dev entry while its release entry is skipped (the updater logs `SKIP <name>: release entry skipped … keeping dev entry only`). |
 | `minServerVersion` | no | Minimum Phlix server version the plugin declares (from its `phlix_min_server_version` at the pinned `ref`). **Catalog metadata only:** the current server does not include this field in its catalog wire shape and does not pre-gate the admin UI with it — it enforces compatibility at install time, after download, from the plugin's own manifest (`PluginLoader::satisfiesServerVersion`). |
 | `maxServerVersion` | no | Maximum Phlix server version supported (exclusive upper bound). Same metadata-only status as `minServerVersion`. |
 | `verified` | no | Whether this entry has been reviewed by the catalog maintainer. Un-verified entries are install-blocked by the server in default-deny mode. Dev-channel entries are always `false`; auto-discovered entries start `false`. The updater RESETS a carried `true` to `false` as a re-attestation event whenever an auto pin move is not a fast-forward of the previously pinned commit, or a tag is recreated (same version, different commit). |
