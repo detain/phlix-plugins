@@ -318,8 +318,12 @@ jobs:
           // artifact form the server downloads (github.com/<owner>/<repo>/archive/<ref>.tar.gz,
           // per the schema) and validate-catalog.yml hashes. The api.github.com tarball
           // endpoint produces DIFFERENT bytes for the same commit. -f makes HTTP errors
-          // fail instead of saving an error body; the gzip-magic check below remains the
-          // backstop. -L is REQUIRED (github.com answers an archive request with a
+          // fail instead of saving an error body, and curl's transfer status is CAPTURED
+          // (%{exitcode}) and required to be zero — a body cut mid-stream after a 200
+          // header would otherwise hash clean through the size and magic-byte guards and
+          // become the pinned digest (review plugins-catalog__devops #3[m], PG-217); the
+          // gzip-magic check plus a full `gzip -t` stream-integrity pass below back that up.
+          // -L is REQUIRED (github.com answers an archive request with a
           // redirect to codeload) but blind redirect-following is exactly how a
           // TRANSFERRED/renamed repo silently swaps artifact provenance, so the
           // effective URL is captured and must still be detain-owned before anything
@@ -331,7 +335,29 @@ jobs:
               $tarball = $dir . '/phlix_plugin_' . $name . $suffix . '.tar.gz';
               // --max-time (review seceng M-PHLIX-PLUGINS-09): a stalled CDN connection
               // must not sit until the job timeout; 120s bounds every archive fetch.
-              $effective = trim((string) shell_exec('curl -fsSL --max-time 120 "https://github.com/detain/' . $name . '/archive/' . $sha . '.tar.gz" -o ' . $tarball . ' -w \'%{url_effective}\' 2>/dev/null'));
+              // %{exitcode} (review plugins-catalog__devops #3[m], PG-217): a mid-stream
+              // disconnect after an HTTP 200 header (exactly what unauthenticated codeload
+              // throttling of shared runner IPs looks like) leaves a NON-EMPTY file that
+              // starts with the gzip magic, so the size + magic-byte guards below pass and
+              // the truncated bytes' sha256 would become the pinned digest. curl's transfer
+              // status is the only thing that distinguishes a complete fetch from a partial
+              // one; -w writes it as the last tab-delimited field so we can refuse the
+              // partial body BEFORE it is trusted. PHP's single-quoted string keeps '\t' as
+              // the two-character literal and curl renders that literal into a real tab;
+              // the effective URL never contains a tab, so the strrpos split below is exact.
+              $rawFetch = trim((string) shell_exec('curl -fsSL --max-time 120 "https://github.com/detain/' . $name . '/archive/' . $sha . '.tar.gz" -o ' . $tarball . ' -w \'%{url_effective}\t%{exitcode}\' 2>/dev/null'));
+              $tabPos = strrpos($rawFetch, "\t");
+              $effective = $tabPos === false ? $rawFetch : substr($rawFetch, 0, $tabPos);
+              $curlExit = $tabPos === false ? '' : substr($rawFetch, $tabPos + 1);
+              // Fail closed on ANY non-zero curl transfer status: a hard failure prints no
+              // -w output at all ($curlExit === ''), a partial transfer reports its exit
+              // code (e.g. 18). Both must never reach hashing. Only the literal '0' passes.
+              if ($curlExit !== '0') {
+                  fwrite(STDERR, 'ERROR: tarball for ' . $name . '@' . substr($sha, 0, 12) . " curl transfer status '" . $curlExit . "' (non-zero) — refusing partial bytes\n");
+                  echo 'SKIP ' . $name . ": fetch reported curl exit '" . $curlExit . "' — not a complete download\n";
+                  @unlink($tarball);
+                  return null;
+              }
               if (!is_file($tarball) || filesize($tarball) <= 0) {
                   @unlink($tarball);
                   return null;
@@ -346,6 +372,21 @@ jobs:
                   return null;
               }
               if (!isGzipFile($tarball)) {
+                  @unlink($tarball);
+                  return null;
+              }
+              // Stream integrity (review plugins-catalog__devops #3[m], PG-217): isGzipFile
+              // only peeks the 2-byte magic, so a body truncated AFTER the header still
+              // "looks like" gzip. `gzip -t` decompresses the WHOLE stream and validates the
+              // CRC-32 + size trailer, so a short write fails loudly. Belt-and-braces with
+              // the exit-status guard above (a truncated body can report exit 0 on some
+              // chunked-transfer teardowns), and it runs BEFORE sha256sum so a bad digest is
+              // never computed from partial bytes; the manifest extraction below relies on
+              // this too (tar -xzf ignores its own exit status here).
+              $gzStatus = trim((string) shell_exec('gzip -t ' . $tarball . ' 2>/dev/null; echo $?'));
+              if ($gzStatus !== '0') {
+                  fwrite(STDERR, 'ERROR: tarball for ' . $name . '@' . substr($sha, 0, 12) . " failed gzip stream-integrity test (gzip -t exit '" . $gzStatus . "') — refusing partial/corrupt bytes\n");
+                  echo 'SKIP ' . $name . ": tarball failed gzip -t integrity check\n";
                   @unlink($tarball);
                   return null;
               }
@@ -558,6 +599,7 @@ jobs:
                   //   <stateDir>/manifest_<name>.json      dev: optional plugin.json
                   //   <stateDir>/tagged_ref_<name>.txt     release: 40-hex tag sha (absent = no tags)
                   //   <stateDir>/tagged_sha256_<name>.txt  release: 64-hex tag tarball digest
+                  //   <stateDir>/tagged_name_<name>.txt    release: tag name (absent = 'unknown-tag')
                   //   <stateDir>/tagged_manifest_<name>.json release: optional plugin.json at tag commit
                   //   <stateDir>/topics_<name>.json        JSON array of repo topics
                   $dir = stateDir();

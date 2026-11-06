@@ -21,6 +21,10 @@ in the README and enforced by CI:
     schema descriptions state what the server actually enforces (the
     ref + artifactSha256 pin) — attestation-only flags are never described
     as install controls — see TestOperatorFacingFieldTruth
+12. README catalog mirror: the Plugins table and its entry-count line are
+    machine-derived from plugins.json and re-generated inside the suite, so a
+    6-hour bot pin move can never again leave the operator-facing table
+    contradicting the catalog — see TestReadmeTableMirrorCatalog
 """
 import json
 import re
@@ -28,6 +32,13 @@ import shutil
 import subprocess
 import pytest
 import jsonschema
+
+# The updater's digest statement, as a full line of PHP. Workflow tripwires anchor
+# ORDER on this exact statement rather than on a bare phrase such as 'sha256sum':
+# the phrase also occurs in explanatory comments and in the ERROR/SKIP messages, so
+# a comment-sized string survives delete-the-command and reorder mutations (the
+# lesson this repo already recorded for PG-118).
+HASHING_STATEMENT = "$computed = trim((string) shell_exec('sha256sum "
 
 
 class TestCatalogSchema:
@@ -913,6 +924,149 @@ class TestOperatorFacingFieldTruth:
             assert "metadata only" in desc.lower(), f"schema {field} description missing the metadata-only truth"
 
 
+class TestReadmeTableMirrorCatalog:
+    """(PG-216 — review plugins-catalog__devops #1[M] / plugins-catalog__docmaint #3[M])
+    The README '## Plugins' table self-declares it mirrors the release entries of
+    plugins.json 'at this commit' — but update-checksums.yml rewrites plugins.json on
+    a 6-hour bot cadence and NEVER touches README, so the table silently rots (twelve
+    stale rows sat at the review commit, including a false `verified: true` in the
+    operator-facing trust column). Nothing in the suite asserted the table against
+    the live catalog. This class makes the mirror machine-derived: the header count
+    line and every data row are REGENERATED from plugins.json inside the test and
+    compared to the file byte-exactly, so every future catalog wave forces a human
+    README re-sync (the estate-standard anti-rot idiom). It pins the current curated
+    truth, never fights it: the projection consumes only the fields the updater
+    itself writes (title/type/version/minServerVersion/verified/name) and handles the
+    lawful dev-only degradation the README's own `version` row documents."""
+
+    DEV_ONLY_MARKER = "— (dev-only)"
+
+    @staticmethod
+    def _expected_projection(plugins):
+        """Derive the README table from the catalog: one row per plugin NAME in
+        canonical first-seen order; a name projects to its release entry, falling
+        back to its dev entry (with the dev-only marker) when the release was
+        lawfully skipped. Returns (table_rows, name_count, entry_count)."""
+        order = []
+        byname = {}
+        for entry in plugins:
+            name = entry["name"]
+            if name not in byname:
+                byname[name] = {"release": None, "dev": None}
+                order.append(name)
+            slot = "dev" if entry["version"] == "dev" else "release"
+            byname[name][slot] = entry
+        rows = []
+        for name in order:
+            release = byname[name]["release"]
+            source = release if release is not None else byname[name]["dev"]
+            assert source is not None, f"catalog name {name} has neither release nor dev entry"
+            version = release["version"] if release is not None else TestReadmeTableMirrorCatalog.DEV_ONLY_MARKER
+            repo_url = f"https://github.com/detain/{name}"
+            rows.append(
+                f"| {source['title']} | `{source['type']}` | {version} "
+                f"| ≥ {source['minServerVersion']} | {str(bool(source.get('verified', False))).lower()} "
+                f"| [{name}]({repo_url}) |"
+            )
+        return rows, len(order), len(plugins)
+
+    @staticmethod
+    def _readme_table_rows(readme):
+        lines = readme.splitlines()
+        try:
+            start = next(
+                i for i, line in enumerate(lines)
+                if line.startswith("| Plugin | Type | Release | Min Server | Verified | Repo |")
+            )
+        except StopIteration:
+            raise AssertionError("README lost the Plugins table header row")
+        header = lines[start]
+        data = []
+        for line in lines[start + 2:]:
+            if not line.startswith("| "):
+                break
+            data.append(line)
+        return header, data
+
+    def test_readme_release_table_matches_the_catalog(self, repo_root, plugins):
+        """Every README table row must equal the catalog-derived projection —
+        version, minServerVersion AND the verified trust column — so a bot pin
+        move or an updater re-attestation reset can never again leave the
+        operator-facing table asserting a state plugins.json contradicts."""
+        readme = (repo_root / "README.md").read_text()
+        _, actual = self._readme_table_rows(readme)
+        expected, _, _ = self._expected_projection(plugins)
+        assert actual, "README Plugins table carries zero data rows"
+        assert len(actual) == len(expected), (
+            f"README table has {len(actual)} rows, plugins.json projects {len(expected)} "
+            "(a table row was dropped or a catalog name appeared without a row)"
+        )
+        drift = [
+            f"  row {idx}: README  {a!r}\n  row {idx}: projected {e!r}"
+            for idx, (a, e) in enumerate(zip(actual, expected), 1) if a != e
+        ]
+        assert not drift, "README Plugins table drifted from plugins.json — regenerate it " \
+            "(machine-derived mirror; update-checksums moves pins on a 6h cadence " \
+            f"and never touches README):\n" + "\n".join(drift)
+
+    def test_readme_entry_count_line_matches_the_catalog(self, repo_root, plugins):
+        """The prose count above the table ('N plugin names / M entries') is part of
+        the same rot class — pin it to the catalog too."""
+        readme = (repo_root / "README.md").read_text()
+        m = re.search(r"\*\*(\d+) plugin names / (\d+) entries\*\*", readme)
+        assert m, "README lost the '**N plugin names / M entries**' count line"
+        _, names, entries = self._expected_projection(plugins)
+        assert (int(m.group(1)), int(m.group(2))) == (names, entries), (
+            f"README count {m.group(1)} names / {m.group(2)} entries vs catalog {names} / {entries}"
+        )
+
+    def test_the_projection_is_catalog_driven_not_hardcoded(self, plugins):
+        """Teeth proof: the expectation is DERIVED, so a pin/version move in a
+        throwaway catalog copy must move exactly the affected projected row. A
+        hardcoded snapshot would stay put — and README rot would pass unseen,
+        which is the exact defect class this mirror test exists to catch."""
+        import copy
+        base_rows, base_names, base_entries = self._expected_projection(plugins)
+        mutated = copy.deepcopy(plugins)
+        bumped = 0
+        for entry in mutated:
+            if entry["version"] != "dev":
+                entry["version"] = "9.9.9"
+                entry["verified"] = not bool(entry.get("verified", False))
+                bumped += 1
+        mut_rows, mut_names, mut_entries = self._expected_projection(mutated)
+        assert bumped >= 1 and (mut_names, mut_entries) == (base_names, base_entries)
+        moved = [idx for idx, (a, b) in enumerate(zip(base_rows, mut_rows)) if a != b]
+        assert len(moved) == bumped, (
+            f"projection must move exactly on the {bumped} mutated releases, moved: {moved}"
+        )
+
+    def test_projection_handles_the_dev_only_degradation(self):
+        """A name whose release entry the updater lawfully skipped keeps only its
+        dev twin; the projection must render the documented '— (dev-only)' row
+        instead of asserting a version the catalog never carries."""
+        dev_only = {
+            "name": "phlix-plugin-synthetic-probe", "title": "Synthetic Probe",
+            "type": "metadata-provider", "version": "dev", "minServerVersion": "1.2.0",
+            "verified": False,
+        }
+        rows, names, entries = self._expected_projection([dev_only])
+        assert (names, entries) == (1, 1)
+        assert rows[0].startswith("| Synthetic Probe | `metadata-provider` | " + self.DEV_ONLY_MARKER + " |")
+
+    def test_readme_mirror_claim_and_tripwire_are_documented_together(self, repo_root):
+        """The :17 self-declaring claim must keep pointing at plugins.json AND the
+        table must disclose that a pytest tripwire enforces it — an unenforced
+        'mirrors at this commit' claim is what rotted in the first place."""
+        readme = (repo_root / "README.md").read_text()
+        normalized = " ".join(readme.split())
+        assert "mirrors the release entries of" in normalized, \
+            "README dropped its self-declared mirror claim (the tripwire enforces it)"
+        segment = readme[readme.index("## Plugins"):readme.index("## Catalog format")]
+        assert "tripwire" in segment.lower(), \
+            "README table region must disclose the pytest anti-rot tripwire that enforces the mirror"
+
+
 class TestWorkflowContract:
     """Executable tripwires for the laws that live INSIDE the workflow YAML.
 
@@ -1016,6 +1170,64 @@ class TestWorkflowContract:
             "function reattestedVerified",
         ):
             assert marker in update_wf, f"trust guard vanished from updater: {marker}"
+
+    def test_updater_fetch_captures_curl_exit_status(self, update_wf):
+        """(PG-217 — review plugins-catalog__devops #3[m]) A mid-stream disconnect
+        after an HTTP 200 header (unauthenticated codeload throttling of shared
+        runner IPs) leaves a non-empty file that starts with the gzip magic, so the
+        size + magic-byte guards pass and the TRUNCATED bytes' sha256 would become
+        the pinned digest. curl's transfer status is the only signal that separates a
+        complete fetch from a partial one, so the fetch must WRITE it out
+        (%{exitcode}) and REFUSE on anything but a literal '0' — including the empty
+        string curl prints when the process dies before emitting -w output."""
+        # Full-LINE pins only (the estate's PG-118 lesson): a bare phrase like
+        # %{exitcode} also appears in the explanatory comments, so a comment-shaped
+        # string survives delete-the-command mutations. Anchor on the real statements.
+        fetch_line = next(
+            (line for line in update_wf.splitlines()
+             if line.strip().startswith("$rawFetch = trim(") and "curl " in line),
+            None,
+        )
+        assert fetch_line is not None, "the updater's fetch assignment statement vanished"
+        assert r"-w \'%{url_effective}\t%{exitcode}\'" in fetch_line, (
+            "the fetch line no longer writes out curl's exit status alongside the URL"
+        )
+        guard = "if ($curlExit !== '0') {"
+        assert guard in update_wf, "fetch no longer requires a zero curl exit status"
+        assert "refusing partial bytes" in update_wf, "non-zero-exit refusal path vanished"
+        # the refusal must return null (never reach hashing) and clean the scratch file
+        i = update_wf.index(guard)
+        j = update_wf.index(HASHING_STATEMENT)
+        assert i < j, "the exit-status guard must run BEFORE sha256sum is computed"
+        seg = update_wf[i:j]
+        assert "return null" in seg and "@unlink($tarball)" in seg, (
+            "non-zero-exit path must drop the file and return null, not fall through"
+        )
+
+    def test_updater_fetch_verifies_gzip_stream_integrity_before_hashing(self, update_wf):
+        """(PG-217 — review plugins-catalog__devops #3[m]) isGzipFile only peeks the
+        2-byte magic, so a body truncated AFTER the header still "looks like" gzip.
+        A full `gzip -t` decompresses the whole stream and validates the CRC-32 +
+        size trailer — belt-and-braces with the exit-status guard (a truncated body
+        can still report exit 0 on some chunked-transfer teardowns) — and it must run
+        BEFORE sha256sum so a bad digest is never computed from partial bytes."""
+        # Full-LINE anchor (see HASHING_STATEMENT note): 'gzip -t ' also appears in
+        # the refusal messages, so a phrase search survives moving/deleting the
+        # command. Pin the statement itself and order against the digest statement.
+        gzip_statement = (
+            "$gzStatus = trim((string) shell_exec('gzip -t ' . $tarball . ' 2>/dev/null; echo $?'));"
+        )
+        assert gzip_statement in update_wf, \
+            "gzip stream-integrity COMMAND vanished from the updater (a comment is not a check)"
+        assert "if ($gzStatus !== '0') {" in update_wf, "gzip -t result is no longer enforced"
+        assert "failed gzip stream-integrity" in update_wf, "gzip -t refusal path vanished"
+        i = update_wf.index(gzip_statement)
+        j = update_wf.index(HASHING_STATEMENT)
+        assert i < j, "the gzip -t integrity pass must run BEFORE sha256sum"
+        seg = update_wf[i:j]
+        assert "return null" in seg and "@unlink($tarball)" in seg, (
+            "gzip -t failure must drop the file and return null, not hash partial bytes"
+        )
 
     def test_ci_installs_python_deps_from_the_hash_lock(self, validate_wf, repo_root):
         """M-07: the CI pytest job consumes requirements-test.txt with
@@ -1203,6 +1415,25 @@ class TestWorkflowContract:
         readme = (repo_root / "README.md").read_text()
         assert "api.github.com/repos/<owner>/<repo>/tarball" in readme
         assert "**different bytes**" in readme
+
+    def test_readme_format_example_uses_synthetic_pins(self, repo_root, plugins):
+        """(PG-123 — review plugins-catalog__docmaint #7[i]) The illustrative entry
+        used a REAL plugin name with real-shaped stale pins (`phlix-plugin-anidb`,
+        a plausible 40-hex ref, a plausible 64-hex digest), which invites copy-
+        pasting a wrong pin into a real entry. The example must carry unmistakably
+        synthetic values — the same a×40 / 0×64 placeholder idiom the simulation
+        section teaches — and its name must not exist in the live catalog."""
+        readme = (repo_root / "README.md").read_text()
+        m = re.search(r"```json\n(.*?)\n```", readme, re.DOTALL)
+        assert m, "README lost its fenced format example"
+        example = json.loads(m.group(1))
+        (entry,) = example["plugins"]
+        assert entry["name"] not in {p["name"] for p in plugins}, \
+            "format example names a real plugin again — real names invite real-pin copy-paste"
+        assert entry["ref"] == "a" * 40, \
+            f"example ref must be the synthetic a×40 placeholder, got {entry['ref']!r}"
+        assert entry["artifactSha256"] == "0" * 64, \
+            "example artifactSha256 must be the synthetic 0×64 placeholder"
 
     def test_push_triggers_are_master_only(self, repo_root):
         """(M-PHLIX-PLUGINS-02) Both workflows trigger on pushes to `master` ONLY —

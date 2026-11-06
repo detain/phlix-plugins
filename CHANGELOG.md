@@ -10,6 +10,47 @@ that record.
 
 ## Unreleased
 
+### Fixed — review→fix wave 3, lane w06L10 (2026-11-06)
+- README: the Plugins table was regenerated from `plugins.json` — twelve rows were
+  stale at the review commit (AniDB 0.3.0→0.4.1, AniList 0.2.0→0.4.0, Example
+  0.1.1→0.1.2, Last.fm 1.1.0→1.2.0, MusicBrainz 0.2.0→0.4.0, MyAnimeList
+  0.2.0→0.3.0, OMDb 0.2.0→0.3.0, OpenSubtitles 0.2.0→0.6.0, Phantom Mint Theme
+  dev-only→1.0.0, Phantom Violet Theme 1.0.0→1.0.1, Trakt 1.2.0→1.5.0) and the
+  count line said 41 entries while the catalog carried 42. The stalest cell was
+  operator-facing: Sample Theme was advertised `verified: true` after the updater
+  had legitimately reset the attestation on a non-fast-forward pin move (review
+  plugins-catalog__devops #1[M] + plugins-catalog__docmaint #3[M], PG-216).
+- The mirror is durable, not hopeful: new `TestReadmeTableMirrorCatalog` derives
+  every table row AND the count line from `plugins.json` and compares byte-exactly
+  (reddened at exactly the twelve stale rows + the 41-vs-42 count before the
+  README landed), so every future catalog wave forces a human re-sync — the
+  updater rewrites the catalog on a 6-hour bot cadence and never touches README,
+  which is how the table rotted. The projection is catalog-driven (a teeth test
+  mutates a copy and requires exactly the bumped rows to move) and it honors the
+  documented dev-only degradation instead of inventing a version.
+- update-checksums.yml: `fetchTargetTarball()` now CAPTURES curl's transfer status
+  (`-w '%{url_effective}\t%{exitcode}'`) and refuses any non-zero exit before the
+  bytes are trusted, and adds a full `gzip -t` stream-integrity pass before
+  `sha256sum`. Previously the exit code was thrown away: an HTTP 200 whose body was
+  cut mid-stream — exactly what unauthenticated codeload throttling of shared
+  runner IPs looks like — left a non-empty file starting with the gzip magic, so
+  every old guard passed and the TRUNCATED bytes' digest could become the pinned
+  `artifactSha256`. Reproduced locally (200 + half body: old size>0 and magic-byte
+  guards both pass; `gzip -t` exits 1 and the new status guard exits 18) and the
+  happy path re-proven live (trakt's pin fetched through the new guards hashes to
+  the catalog digest) (devops #3[m], PG-217).
+- README: the illustrative `plugins.json` entry no longer uses a real plugin name
+  with real-shaped stale pins — the pin values are now the unmistakable synthetic
+  placeholders (a×40 ref / 0×64 digest) the simulation fixtures already teach, and
+  a tripwire refuses any regression toward a copy-pasteable pin
+  (docmaint #7[i], PG-123).
+- Prose currency: the updater size claim now matches the measured heredoc
+  (~1,100 PHP lines, was "~900") (docmaint #5[m], PG-121); validate-catalog's
+  pin-drift timeout/advisory comments say "one re-hash per catalog entry" instead
+  of a stale "~41" (docmaint #6[m], PG-122); the fixture state-layout doc gained
+  the `tagged_name_<name>.txt` line the loader actually reads (docmaint #8[i],
+  PG-124).
+
 ### Fixed — review→fix wave 2, lane w02L9 (2026-11-06)
 - README + schema: `verified` is now documented as what it actually is — a
   maintainer ATTESTATION the server never parses. The default-deny install gate is

@@ -153,12 +153,13 @@ jobs:
   pin-drift:
     name: Pin-drift (blocking on push)
     runs-on: ubuntu-26.04
-    # (M-PHLIX-PLUGINS-09) generous for ~41 re-hashes but far under the 6h default.
+    # (M-PHLIX-PLUGINS-09) one re-hash per catalog entry, so the bound is generous
+    # at any realistic fleet size while staying far under the 6h default.
     timeout-minutes: 20
     # Surfaces ref/artifactSha256 drift. BLOCKS pushes (a moved pin whose bytes
     # don't hash to the recorded digest must never pass silently on the trunk —
     # review phlix-plugins__seceng M-05); stays advisory on pull requests so
-    # external PRs don't flake on network/CDN hiccups while re-hashing 41+
+    # external PRs don't flake on network/CDN hiccups while re-hashing every
     # tarballs. Gated behind `needs: schema` (M-06): never fetch URLs minted
     # from an unvalidated catalog.
     continue-on-error: ${{ github.event_name == 'pull_request' }}

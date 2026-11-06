@@ -12,35 +12,41 @@ another catalog URL, or paste a single plugin repo URL directly.
 
 ## Plugins
 
-The catalog currently carries **21 plugin names / 41 entries** — a name normally
+The catalog currently carries **21 plugin names / 42 entries** — a name normally
 appears twice (a semver `release` entry plus a `"dev"` twin, see the `version`
 field below; the dev twins are omitted from the table). This table mirrors the
-release entries of [`plugins.json`](plugins.json) **at this commit** — that file
-is the source of truth, and remember `master` is not operator-live until a
-catalog release tag is cut
+release entries of [`plugins.json`](plugins.json) **at this commit** — a machine-derived
+view (one row per name: its release entry, or its dev entry as `— (dev-only)`
+when the release was lawfully skipped), and a pytest tripwire —
+`TestReadmeTableMirrorCatalog` in [`tests/test_catalog.py`](tests/test_catalog.py) —
+regenerates every row below and the count line above straight from the catalog, so
+the suite reddens whenever README drifts from plugins.json (the updater rewrites the
+catalog on a 6-hour bot cadence and never touches this file). `plugins.json` stays
+the source of truth, and remember `master` is not operator-live until a catalog
+release tag is cut
 ([Publishing a catalog release](#publishing-a-catalog-release-what-servers-actually-read)).
 
 | Plugin | Type | Release | Min Server | Verified | Repo |
 |---|---|---|---|---|---|
-| AniDB | `metadata-provider` | 0.3.0 | ≥ 1.2.0 | true | [phlix-plugin-anidb](https://github.com/detain/phlix-plugin-anidb) |
-| AniList | `metadata-provider` | 0.2.0 | ≥ 1.2.0 | true | [phlix-plugin-anilist](https://github.com/detain/phlix-plugin-anilist) |
+| AniDB | `metadata-provider` | 0.4.1 | ≥ 1.2.0 | true | [phlix-plugin-anidb](https://github.com/detain/phlix-plugin-anidb) |
+| AniList | `metadata-provider` | 0.4.0 | ≥ 1.2.0 | true | [phlix-plugin-anilist](https://github.com/detain/phlix-plugin-anilist) |
 | Arctic Jade Theme | `ui-theme` | 1.0.0 | ≥ 0.44.0 | false | [phlix-plugin-arctic-jade-theme](https://github.com/detain/phlix-plugin-arctic-jade-theme) |
 | Emerald Abyss Theme | `ui-theme` | 1.0.0 | ≥ 0.44.0 | false | [phlix-plugin-emerald-abyss-theme](https://github.com/detain/phlix-plugin-emerald-abyss-theme) |
-| Example | `metadata-provider` | 0.1.1 | ≥ 0.10.0 | false | [phlix-plugin-example](https://github.com/detain/phlix-plugin-example) |
+| Example | `metadata-provider` | 0.1.2 | ≥ 0.10.0 | false | [phlix-plugin-example](https://github.com/detain/phlix-plugin-example) |
 | Jade Theme | `ui-theme` | 1.0.0 | ≥ 0.44.0 | false | [phlix-plugin-jade-theme](https://github.com/detain/phlix-plugin-jade-theme) |
-| Last.fm | `scrobbler` | 1.1.0 | ≥ 1.2.0 | true | [phlix-plugin-lastfm](https://github.com/detain/phlix-plugin-lastfm) |
-| MusicBrainz | `metadata-provider` | 0.2.0 | ≥ 1.2.0 | true | [phlix-plugin-musicbrainz](https://github.com/detain/phlix-plugin-musicbrainz) |
-| MyAnimeList | `metadata-provider` | 0.2.0 | ≥ 1.2.0 | true | [phlix-plugin-myanimelist](https://github.com/detain/phlix-plugin-myanimelist) |
+| Last.fm | `scrobbler` | 1.2.0 | ≥ 1.2.0 | true | [phlix-plugin-lastfm](https://github.com/detain/phlix-plugin-lastfm) |
+| MusicBrainz | `metadata-provider` | 0.4.0 | ≥ 1.2.0 | true | [phlix-plugin-musicbrainz](https://github.com/detain/phlix-plugin-musicbrainz) |
+| MyAnimeList | `metadata-provider` | 0.3.0 | ≥ 1.2.0 | true | [phlix-plugin-myanimelist](https://github.com/detain/phlix-plugin-myanimelist) |
 | Mystic Jade Theme | `ui-theme` | 1.0.0 | ≥ 0.44.0 | false | [phlix-plugin-mystic-jade-theme](https://github.com/detain/phlix-plugin-mystic-jade-theme) |
 | Obsidian Flame Theme | `ui-theme` | 1.0.0 | ≥ 0.44.0 | false | [phlix-plugin-obsidian-flame-theme](https://github.com/detain/phlix-plugin-obsidian-flame-theme) |
-| OMDb | `metadata-provider` | 0.2.0 | ≥ 1.2.0 | true | [phlix-plugin-omdb](https://github.com/detain/phlix-plugin-omdb) |
-| OpenSubtitles | `subtitle-provider` | 0.2.0 | ≥ 1.2.0 | true | [phlix-plugin-opensubtitles](https://github.com/detain/phlix-plugin-opensubtitles) |
+| OMDb | `metadata-provider` | 0.3.0 | ≥ 1.2.0 | true | [phlix-plugin-omdb](https://github.com/detain/phlix-plugin-omdb) |
+| OpenSubtitles | `subtitle-provider` | 0.6.0 | ≥ 1.2.0 | true | [phlix-plugin-opensubtitles](https://github.com/detain/phlix-plugin-opensubtitles) |
 | Phantom Mint | `ui-theme` | 1.0.0 | ≥ 0.44.0 | false | [phlix-plugin-phantom-mint](https://github.com/detain/phlix-plugin-phantom-mint) |
-| Phantom Mint Theme | `ui-theme` | — (dev-only) | ≥ 0.44.0 | false | [phlix-plugin-phantom-mint-theme](https://github.com/detain/phlix-plugin-phantom-mint-theme) |
-| Phantom Violet Theme | `ui-theme` | 1.0.0 | ≥ 0.44.0 | false | [phlix-plugin-phantom-violet-theme](https://github.com/detain/phlix-plugin-phantom-violet-theme) |
-| Sample Theme | `ui-theme` | 1.0.0 | ≥ 0.44.0 | true | [phlix-plugin-sample-theme](https://github.com/detain/phlix-plugin-sample-theme) |
+| Phantom Mint Theme | `ui-theme` | 1.0.0 | ≥ 0.44.0 | false | [phlix-plugin-phantom-mint-theme](https://github.com/detain/phlix-plugin-phantom-mint-theme) |
+| Phantom Violet Theme | `ui-theme` | 1.0.1 | ≥ 0.44.0 | false | [phlix-plugin-phantom-violet-theme](https://github.com/detain/phlix-plugin-phantom-violet-theme) |
+| Sample Theme | `ui-theme` | 1.0.0 | ≥ 0.44.0 | false | [phlix-plugin-sample-theme](https://github.com/detain/phlix-plugin-sample-theme) |
 | Spectral Dusk Theme | `ui-theme` | 1.0.0 | ≥ 0.44.0 | false | [phlix-plugin-spectral-dusk-theme](https://github.com/detain/phlix-plugin-spectral-dusk-theme) |
-| Trakt | `scrobbler` | 1.2.0 | ≥ 1.2.0 | true | [phlix-plugin-trakt](https://github.com/detain/phlix-plugin-trakt) |
+| Trakt | `scrobbler` | 1.5.0 | ≥ 1.2.0 | true | [phlix-plugin-trakt](https://github.com/detain/phlix-plugin-trakt) |
 | Void Bloom Theme | `ui-theme` | 1.0.0 | ≥ 0.44.0 | false | [phlix-plugin-void-bloom-theme](https://github.com/detain/phlix-plugin-void-bloom-theme) |
 | Volcanic Ember Theme | `ui-theme` | 1.0.0 | ≥ 0.44.0 | false | [phlix-plugin-volcanic-ember-theme](https://github.com/detain/phlix-plugin-volcanic-ember-theme) |
 
@@ -67,26 +73,31 @@ default branch's HEAD *as re-captured by the updater at the last refresh*, so th
 dev channel follows the branch by re-pinning forward, not by asking installers
 to resolve a branch name.
 
+Every value below is a deliberately synthetic placeholder — the `ref` is 40 `a`s
+and the `artifactSha256` is 64 `0`s, the same convention the simulation section
+below feeds its fixtures with `printf` — so the illustrative shape can never be
+mistaken for (or copy-pasted as) a live pin.
+
 ```json
 {
   "schemaVersion": 2,
   "name": "Phlix Official Plugins",
   "plugins": [
     {
-      "name": "phlix-plugin-anidb",
-      "title": "AniDB",
+      "name": "phlix-plugin-synthetic",
+      "title": "Synthetic",
       "type": "metadata-provider",
-      "summary": "Anime metadata from AniDB.",
-      "description": "AniDB metadata provider — …",
-      "repo": "https://github.com/detain/phlix-plugin-anidb",
-      "ref": "3bf51b6822b15ec990832169be0443189e28a729",
-      "artifactSha256": "6de62ceef330f18faebc1e1b400dd4566ba4b25578164950b36d439ddb692b85",
-      "version": "0.3.0",
+      "summary": "Illustrative entry — shows the JSON shape only.",
+      "description": "Not a catalog member: the pin values are placeholders.",
+      "repo": "https://github.com/detain/phlix-plugin-synthetic",
+      "ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "artifactSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "version": "1.0.0",
       "minServerVersion": "1.2.0",
-      "verified": true,
+      "verified": false,
       "deprecated": false,
       "yanked": false,
-      "tags": ["anime", "metadata"]
+      "tags": ["example", "shape"]
     }
   ]
 }
@@ -280,7 +291,7 @@ python3 -m pytest tests/ -v --tb=short --cov=. --cov-report=term-missing
 
 ## Exercising the updater locally (simulation)
 
-The updater is ~900 lines of PHP living inside a YAML heredoc — deliberate (the
+The updater is ~1,100 lines of PHP living inside a YAML heredoc — deliberate (the
 PHP-first single-job law keeps it next to its trigger), but it is still fully
 runnable **off** GitHub Actions against fixtures. Extract the script, then drive
 it with the four seam variables the script itself reads:
