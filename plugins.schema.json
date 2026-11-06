@@ -101,19 +101,19 @@
           "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-(?:(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+[0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*)?$"
         },
         "verified": {
-          "description": "Whether this entry has been reviewed and verified by the catalog maintainer. An un-verified entry (false) is install-blocked by the server in default-deny mode. Dev-channel entries are always false and auto-discovered entries start false. The updater RESETS a carried true to false as a re-attestation event when the pin moves outside fast-forward lineage, or when a tag is recreated (same version, different commit).",
+          "description": "Catalog maintainer's attestation: whether a human reviewed this entry. NOT an install control on the current server — the server never parses this boolean. The default-deny install gate is the pin itself: the server recomputes an entry's verified state from ref + artifactSha256 presence (CatalogEntry::verified()) and refuses only an incomplete pin (operator override PHLIX_PLUGINS_ALLOW_UNVERIFIED=1), which is why dev-channel entries stay installable while always carrying false. Auto-discovered entries start false. The updater RESETS a carried true to false as a re-attestation event when the pin moves outside fast-forward lineage, or when a tag is recreated (same version, different commit).",
           "type": "boolean"
         },
         "deprecated": {
-          "description": "Whether this plugin entry is deprecated. Deprecated entries may still be installable but the server will warn operators.",
+          "description": "Catalog metadata only: whether the catalog maintainer marks this entry deprecated. The current server does not parse this field at all — it neither warns operators nor changes installability; author-side vocabulary reserved for a future server-side deprecation surface.",
           "type": "boolean"
         },
         "yanked": {
-          "description": "Whether this plugin version has been yanked (withdrawn). A yanked entry is hidden from the catalog listing but still known to the server for operators who have it installed.",
+          "description": "Catalog metadata only: whether this plugin version has been withdrawn by the catalog maintainer. The current server does not parse this field and does not hide entries from the listing — same reserved-vocabulary status as deprecated.",
           "type": "boolean"
         },
         "deprecationMessage": {
-          "description": "Human-readable message shown when a deprecated or yanked entry is encountered. Explains why and what to use instead.",
+          "description": "Catalog metadata only: human-readable message intended for deprecated/yanked entries (explains why and what to use instead). No current server or admin-UI surface parses this field.",
           "type": "string"
         },
         "author": {

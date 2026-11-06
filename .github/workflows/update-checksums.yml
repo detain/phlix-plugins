@@ -1149,8 +1149,18 @@ jobs:
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           git add plugins.json
-          git diff --cached --quiet || git commit -m 'chore(ci): update plugin catalog checksums'
+          # Print the stat WHILE the change is staged (review devops #5[i], PG-118):
+          # after `git commit` the index is clean and `git diff --cached --stat`
+          # there always printed nothing where it plainly intended to show the run.
           git diff --cached --stat
+          git diff --cached --quiet || git commit -m 'chore(ci): update plugin catalog checksums'
+          # Shallow-history guard (review devops #4[i], PG-117): the checkout is
+          # fetch-depth: 1, and a shallow clone cannot find a merge base for the
+          # rebase below when master advanced by two or more commits during the run
+          # (overlapping updater runs — e.g. cron plus a plugin-push dispatch). Deepen
+          # the local history first so the retry loop has real ancestry to rebase onto;
+          # a failed deepen is non-fatal — the loud retry loop remains the safety net.
+          git fetch --deepen=50 || echo "WARN: history deepen failed; the rebase below may hit a shallow merge base"
           # retry pull-rebase-push so cron runs don't clobber concurrent pushes; fail LOUDLY if it can't land
           for i in 1 2 3; do
             if git pull --rebase --autostash && git push; then exit 0; fi

@@ -1,7 +1,7 @@
 name: Validate catalog
 
 # Validates plugins.json (the trust root the Phlix server reads) on pushes to
-# master and on pull requests:
+# master, on pull requests, and on a daily schedule:
 #   1. JSON-Schema conformance against plugins.schema.json (pinned validator).
 #   2. plugins.json is valid JSON AND entries are in canonical order (name
 #      ascending, dev-channel entries — version "dev" — last within a name, version
@@ -53,6 +53,18 @@ on:
   push:
     branches: [master]
   pull_request:
+  # Daily re-attestation of master (review plugins-catalog__devops #2[m], PG-116).
+  # Bot pushes never re-trigger this workflow, so between human pushes the ajv /
+  # pin-drift / manifest fleet would otherwise go dark while the scheduled
+  # updater keeps rewriting the trust root on the 6-hour cadence. A daily cron
+  # re-validates the content release tags are cut from — the three data-trust
+  # legs (schema, pin-drift re-hash, blocking manifest gate) all run on schedule
+  # events; the pytest leg keeps its push/same-repo-PR guard (it executes repo
+  # Python; workflow content only changes on human pushes anyway). Off-peak
+  # minute, no new trust surface — minutes of runner time for continuous
+  # attestation of master.
+  schedule:
+    - cron: '17 6 * * *'
 
 permissions:
   contents: read

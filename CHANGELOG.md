@@ -10,6 +10,41 @@ that record.
 
 ## Unreleased
 
+### Fixed — review→fix wave 2, lane w02L9 (2026-11-06)
+- README + schema: `verified` is now documented as what it actually is — a
+  maintainer ATTESTATION the server never parses. The default-deny install gate is
+  the `ref` + `artifactSha256` pin (`CatalogEntry::verified()` recomputes from pin
+  presence; `PHLIX_PLUGINS_ALLOW_UNVERIFIED=1` is the operator override), which is
+  also why always-`false` dev entries are installable — the old wording
+  contradicted itself. Both test docstrings that recited the false flag-gating law
+  were reworded to the pin truth (review plugins-catalog__docmaint #1[M] + #4[m],
+  PG-119).
+- README + schema: `deprecated`, `yanked` and `deprecationMessage` carry the honest
+  "Catalog metadata only" label (the `minServerVersion` idiom): grep across
+  phlix-server `src/` has zero consumers of the three fields — nothing warns
+  operators, nothing hides entries from listings, nothing renders the message
+  (docmaint #2[M], PG-120).
+- Both truths are durable, not prose hopes: new `TestOperatorFacingFieldTruth`
+  tripwires pin the README rows and schema descriptions to the pin-based reality
+  and refuse the reintroduction of the old false claims (reddened at exactly the
+  claimed phrases before the docs landed).
+- validate-catalog.yml: a daily schedule trigger (`17 6 * * *` UTC) re-attests
+  master continuously — the full data-trust legs (ajv schema, blocking pin-drift
+  re-hash, manifest gate) run on schedule events; the pytest leg keeps its
+  push/same-repo-PR guard (docmaint/devops #2[m] class, PG-116).
+- update-checksums.yml Push step: `git fetch --deepen=50` before the rebase retry
+  loop — the fetch-depth: 1 checkout could not find a merge base when master
+  advanced by two or more commits mid-run (devops #4[i], PG-117); and
+  `git diff --cached --stat` moved BEFORE the commit, where it can actually show
+  the landed change instead of printing nothing (devops #5[i], PG-118). Both legs
+  pinned by new `TestWorkflowContract` tripwires.
+- README: the `signature` cohort shape split recorded as deliberate triage
+  (LW-039) — five official repos carry the manifest key as `null` (including the
+  copy-me example), four omit it; both shapes validate against the phlix-shared
+  manifest contract and install identically (`SignatureVerifier` accepts
+  missing/null as unsigned). Unnormalized by design pending the owner
+  signature-policy ruling (estate reel LW-100).
+
 ### Changed — minors campaign batch W-min86 (2026-10-30, vein final)
 - Update-checksums push trigger is `master`-only; the dead `main` entry (and the
   README's `master`/`main` prose) implied mixed-branch semantics the updater

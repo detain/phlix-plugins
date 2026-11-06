@@ -17,6 +17,10 @@ in the README and enforced by CI:
 10. Workflow-contract tripwires: laws that live inside the CI YAML (codeload
     URL idiom, updater regex constants, push-blocking pin-drift, trust-boundary
     guards, shared catalog gate) — see TestWorkflowContract
+11. Operator-facing truth tripwires: the README entry-field table and the
+    schema descriptions state what the server actually enforces (the
+    ref + artifactSha256 pin) — attestation-only flags are never described
+    as install controls — see TestOperatorFacingFieldTruth
 """
 import json
 import re
@@ -170,10 +174,12 @@ class TestPluginVersion:
                 assert self.SEMVER_PATTERN.match(plugin["version"]), f"Release entry not semver: {plugin['name']}@{plugin['version']}"
 
     def test_dev_entries_are_never_verified(self, plugins):
-        """Dev-channel entries are always verified=false: the dev channel tracks the
-        unstable default-branch HEAD, so it stays install-blocked in default-deny
-        until a maintainer reviews it — even for curated plugins whose release entry
-        is verified=true."""
+        """Dev-channel entries are always verified=false: the flag is the catalog
+        maintainer's attestation, and an unreleased default-branch HEAD earns none
+        until a human reviews it — even for curated plugins whose release entry is
+        verified=true. (Attestation, not install-gating: the server's default-deny
+        gate is the entry's ref + artifactSha256 pin, which dev entries do carry —
+        see TestOperatorFacingFieldTruth.)"""
         for plugin in plugins:
             if plugin["version"] == "dev":
                 assert plugin.get("verified") is False, f"Dev entry must be verified=false: {plugin['name']}"
@@ -310,8 +316,10 @@ class TestSpecificPlugins:
 
     def test_unverified_plugins_are_auto_discovered(self, plugins):
         """Un-verified entries are expected: the update-checksums workflow auto-adds
-        newly discovered plugins with verified=false so the server install-blocks them
-        in default-deny mode until a maintainer reviews and verifies them."""
+        newly discovered plugins with verified=false — the catalog's attestation flag,
+        which starts false by design until a maintainer reviews and verifies the entry.
+        (Install-blocking is separate and pin-based: the server refuses entries without
+        a complete ref + artifactSha256 pin, not entries a maintainer has not attested.)"""
         for plugin in plugins:
             assert plugin.get("verified") in (True, False), f"Plugin {plugin['name']} verified must be boolean"
 
@@ -840,6 +848,71 @@ class TestOriginalMethodsWithOptionalFields:
         test_instance.test_deprecation_message_is_string_if_present([plugin_with_deprecation])
 
 
+class TestOperatorFacingFieldTruth:
+    """(PG-119/PG-120 — review plugins-catalog__docmaint #1[M]/#2[M]) The README
+    entry-field table and the schema descriptions are operator-facing trust prose.
+    They must describe what the server ACTUALLY enforces, never an aspirational
+    control. Live-server truth (phlix-server a63dc0db): CatalogEntry never parses
+    the JSON `verified` boolean — its wire verified() is recomputed from pin
+    presence (ref + artifactSha256), the default-deny install gate is that pin
+    (PluginLoader::assertVerifiedOrOverride), and grep across server src/ finds
+    zero consumers of deprecated / yanked / deprecationMessage. These tripwires
+    make the old false claims (flag-gated installs, server warn/hide behavior)
+    structurally impossible to reintroduce."""
+
+    @staticmethod
+    def _readme_row(repo_root, field):
+        readme = (repo_root / "README.md").read_text()
+        rows = [line for line in readme.splitlines() if line.startswith(f"| `{field}` |")]
+        assert rows, f"README lost the `| `{field}` |` entry-field row"
+        return rows[0]
+
+    def test_readme_verified_row_tells_pin_truth(self, repo_root):
+        """The `verified` row must present the flag as a maintainer attestation
+        and name the PIN as the install gate — never 'install-blocked by the
+        server' as a consequence of the flag itself."""
+        row = self._readme_row(repo_root, "verified")
+        assert "install-blocked by the server" not in row, (
+            "verified must not be described as the install control: the server "
+            "never parses the boolean; the gate is the ref + artifactSha256 pin"
+        )
+        for truth in ("attestation", "artifactSha256", "does not read"):
+            assert truth in row, f"README verified row missing pin truth: {truth!r}"
+
+    def test_schema_verified_description_tells_pin_truth(self, schema_json):
+        desc = schema_json["$defs"]["plugin"]["properties"]["verified"]["description"]
+        assert "is install-blocked by the server" not in desc, (
+            "schema verified description re-claims flag-gated installs"
+        )
+        for truth in ("attestation", "artifactSha256", "never parses"):
+            assert truth in desc, f"schema verified description missing truth: {truth!r}"
+
+    def test_readme_deprecation_rows_are_metadata_only(self, repo_root):
+        """deprecated / yanked / deprecationMessage carry the honest
+        metadata-only label (minServerVersion idiom); the invented server
+        behaviors (warns operators, hides listings, shows messages) must not
+        come back without a server change that makes them true."""
+        for field, lie in (
+            ("deprecated", "the server warns operators"),
+            ("yanked", "hidden from the catalog listing"),
+            ("deprecationMessage", "message shown for"),
+        ):
+            row = self._readme_row(repo_root, field)
+            assert lie not in row, f"README {field} row asserts unparsed server behavior: {lie!r}"
+            assert "Catalog metadata only" in row, f"README {field} row missing the metadata-only truth label"
+
+    def test_schema_deprecation_descriptions_are_metadata_only(self, schema_json):
+        props = schema_json["$defs"]["plugin"]["properties"]
+        for field, lie in (
+            ("deprecated", "the server will warn operators"),
+            ("yanked", "hidden from the catalog listing"),
+            ("deprecationMessage", "message shown when"),
+        ):
+            desc = props[field]["description"]
+            assert lie not in desc, f"schema {field} description asserts unparsed server behavior: {lie!r}"
+            assert "metadata only" in desc.lower(), f"schema {field} description missing the metadata-only truth"
+
+
 class TestWorkflowContract:
     """Executable tripwires for the laws that live INSIDE the workflow YAML.
 
@@ -1186,3 +1259,36 @@ class TestWorkflowContract:
         assert i < j, "the undiscovered WARN must run before the final sort/write"
         assert "array_filter($repos, 'is_string')" in update_wf, "discovery keys must be string-guarded"
         assert "array_map('logSafe', array_keys($undiscovered))" in update_wf
+
+    def test_validate_catalog_reruns_on_a_daily_schedule(self, validate_wf):
+        """(PG-116 — review plugins-catalog__devops #2[m]) Bot pushes never
+        re-trigger this workflow, so between human pushes the ajv/pytest/
+        pin-drift/manifest fleet would never run against the bytes release tags
+        are cut from. A DAILY schedule on validate-catalog.yml re-attests master
+        continuously; the cron must stay a real every-day expression."""
+        m = re.search(r"\n {2}schedule:\n(?:.*\n)*? {4}- cron: '([^']+)'", validate_wf)
+        assert m, "validate-catalog.yml lost its schedule trigger (daily re-attestation)"
+        fields = m.group(1).split()
+        assert len(fields) == 5 and fields[3] == "*" and fields[4] == "*", (
+            f"validate-catalog schedule must fire daily, got cron {m.group(1)!r}"
+        )
+
+    def test_push_step_deepens_history_before_the_rebase_loop(self, update_wf):
+        """(PG-117 — review plugins-catalog__devops #4[i]) The checkout is
+        fetch-depth: 1; a shallow clone cannot rebase over a master that advanced
+        by two or more commits mid-run (no merge base — three loud reds and the
+        update defers a cadence). The push step must deepen history BEFORE the
+        pull-rebase loop."""
+        assert "git fetch --deepen=" in update_wf, "shallow-history rebase guard vanished"
+        i_deepen = update_wf.index("git fetch --deepen=")
+        i_rebase = update_wf.index("git pull --rebase --autostash")
+        assert i_deepen < i_rebase, "deepen must precede the rebase retry loop"
+
+    def test_push_step_stats_the_change_before_committing(self, update_wf):
+        """(PG-118 — review plugins-catalog__devops #5[i]) `git diff --cached
+        --stat` AFTER `git commit` always prints nothing (the index is clean by
+        then) — the run log showed an empty stat where it plainly intended to
+        show what landed. Keep the stat while the change is still staged."""
+        i_stat = update_wf.index("git diff --cached --stat")
+        i_commit = update_wf.index("git commit -m 'chore(ci): update plugin catalog checksums'")
+        assert i_stat < i_commit, "post-commit --cached stat prints nothing — move it before the commit"

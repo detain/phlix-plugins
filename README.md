@@ -115,13 +115,26 @@ Per-**entry** fields (each object in `plugins`):
 | `version` | yes | Semver at the pinned `ref` (from its `plugin.json`), or the literal `"dev"` for a plugin's dev-channel entry (HEAD of the default branch — re-pinned every catalog refresh, always `verified: false`). A plugin normally appears as a release entry plus, once the updater has seen it, a `dev` entry with the same `name` — **at most two entries per name**. The pairing can lawfully degrade to **dev-only**: a repo with no usable semver tag, or whose latest tag fails the install-contract gate (invalid/missing `plugin.json` at the tag), is kept as a dev entry while its release entry is skipped (the updater logs `SKIP <name>: release entry skipped … keeping dev entry only`). |
 | `minServerVersion` | yes | Minimum Phlix server version the plugin declares (from its `phlix_min_server_version` at the pinned `ref`) — **required** since M-PHLIX-PLUGINS-13: an entry whose plugin cannot declare it predates the install contract and does not belong in the official catalog (a relaxed fork edits its own schema copy — that is the escape hatch). **Catalog metadata only:** the current server does not include this field in its catalog wire shape and does not pre-gate the admin UI with it — it enforces compatibility at install time, after download, from the plugin's own manifest (`PluginLoader::satisfiesServerVersion`). |
 | `maxServerVersion` | no | Maximum Phlix server version supported (exclusive upper bound). Same metadata-only status as `minServerVersion`. |
-| `verified` | no | Whether this entry has been reviewed by the catalog maintainer. Un-verified entries are install-blocked by the server in default-deny mode. Dev-channel entries are always `false`; auto-discovered entries start `false`. The updater RESETS a carried `true` to `false` as a re-attestation event whenever an auto pin move is not a fast-forward of the previously pinned commit, or a tag is recreated (same version, different commit). |
-| `deprecated` | no | Whether this plugin is deprecated. Deprecated entries may still be installable but the server warns operators. |
-| `yanked` | no | Whether this version has been withdrawn. Yanked entries are hidden from the catalog listing. |
-| `deprecationMessage` | no | Human-readable message shown for deprecated/yanked entries. |
+| `verified` | no | Catalog maintainer's **attestation**: whether a human reviewed this entry. **The current server does not read this boolean** — the default-deny install gate is the *pin itself*: the server verifies downloads against `ref` + `artifactSha256` (it recomputes the wire `verified` from pin presence, `CatalogEntry::verified()`, and refuses only an incomplete pin; operator override `PHLIX_PLUGINS_ALLOW_UNVERIFIED=1`). That is why dev-channel entries — always `false` — are still installable: they carry complete fresh pins. Auto-discovered entries start `false`. The updater RESETS a carried `true` to `false` as a re-attestation event whenever an auto pin move is not a fast-forward of the previously pinned commit, or a tag is recreated (same version, different commit). |
+| `deprecated` | no | Whether the catalog maintainer marks this entry deprecated. **Catalog metadata only:** the current server does not parse this field — it neither warns operators nor changes installability; author-side vocabulary reserved for a future server-side deprecation surface. |
+| `yanked` | no | Whether this version has been withdrawn by the catalog maintainer. **Catalog metadata only:** the current server does not parse this field and does not hide entries from the listing — same reserved-vocabulary status as `deprecated`. |
+| `deprecationMessage` | no | Human-readable message intended for deprecated/yanked entries. **Catalog metadata only:** no current server or admin-UI surface reads it (see the `deprecated` / `yanked` rows). |
 | `summary` / `description` | no | Short / long description. |
 | `author` | no | Catalog-declared author/owner. |
 | `tags` | no | Bounded tags (lowercase-alnum `[._-]` charset, max 20 per entry — M-PHLIX-PLUGINS-12); the updater unions repo topics (minus a dynamic majority-family denylist **and** an owner-curated static floor such as `media-server`/`plex`/`composer-package`) with curated tags (minus the static floor only). |
+
+**Manifest-side note (`signature`) — recorded triage (LW-039).** The `signature` key in each
+plugin's own `plugin.json` — the manifest the admission contract validates — is optional in the
+phlix-shared manifest contract: either a `sha256:<64-hex>` string or `null`, never in the required
+set, and the server's `SignatureVerifier` treats a missing key and a `null` value identically
+(accepted as unsigned, with a warning log). The official cohort's manifest shape is split today:
+five repos carry `"signature": null` (`phlix-plugin-anidb`, `phlix-plugin-myanimelist`,
+`phlix-plugin-omdb`, `phlix-plugin-opensubtitles`, and `phlix-plugin-example` — the copy-me
+template new plugins start from) while four carry no key at all (`phlix-plugin-trakt`,
+`phlix-plugin-lastfm`, `phlix-plugin-anilist`, `phlix-plugin-musicbrainz`). Both shapes validate
+and install identically, so this is cosmetic drift, not a defect — recorded here as **deliberately
+unnormalized** pending the owner signature-policy ruling (estate reel LW-100), which will decide
+whether to normalize the cohort or retire the copy-me `null` from the example.
 
 The official catalog is the trust root: any change to a `ref` is a reviewable
 git diff, so a malicious silent rewrite of an install target is visible in
