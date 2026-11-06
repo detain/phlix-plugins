@@ -1285,10 +1285,21 @@ class TestWorkflowContract:
         assert i_deepen < i_rebase, "deepen must precede the rebase retry loop"
 
     def test_push_step_stats_the_change_before_committing(self, update_wf):
-        """(PG-118 — review plugins-catalog__devops #5[i]) `git diff --cached
-        --stat` AFTER `git commit` always prints nothing (the index is clean by
-        then) — the run log showed an empty stat where it plainly intended to
-        show what landed. Keep the stat while the change is still staged."""
-        i_stat = update_wf.index("git diff --cached --stat")
+        """(PG-118 — review plugins-catalog__devops #5[i]; teeth repair
+        2026-11-06) `git diff --cached --stat` AFTER `git commit` always prints
+        nothing (the index is clean by then) — the run log showed an empty stat
+        where it plainly intended to show what landed. Keep the stat while the
+        change is still staged. The original pin searched the bare phrase with
+        .index(), which anchored on the explanatory COMMENT above the command
+        and survived both swap-to-post-commit and delete-the-command mutation
+        probes; the pin now matches the full command LINE (indent and
+        surrounding newlines included), so comment text can never satisfy it."""
+        stat_line = "\n          git diff --cached --stat\n"
+        assert stat_line in update_wf, (
+            "the push step lost its staged `git diff --cached --stat` command "
+            "line (the explanatory comment does not count — that was the "
+            "original toothless-pin bug)"
+        )
+        i_stat = update_wf.index(stat_line)
         i_commit = update_wf.index("git commit -m 'chore(ci): update plugin catalog checksums'")
         assert i_stat < i_commit, "post-commit --cached stat prints nothing — move it before the commit"

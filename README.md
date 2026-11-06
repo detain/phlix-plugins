@@ -133,7 +133,7 @@ five repos carry `"signature": null` (`phlix-plugin-anidb`, `phlix-plugin-myanim
 template new plugins start from) while four carry no key at all (`phlix-plugin-trakt`,
 `phlix-plugin-lastfm`, `phlix-plugin-anilist`, `phlix-plugin-musicbrainz`). Both shapes validate
 and install identically, so this is cosmetic drift, not a defect — recorded here as **deliberately
-unnormalized** pending the owner signature-policy ruling (estate reel LW-100), which will decide
+unnormalized** pending the owner signature-policy ruling (estate reel LW-098), which will decide
 whether to normalize the cohort or retire the copy-me `null` from the example.
 
 The official catalog is the trust root: any change to a `ref` is a reviewable
