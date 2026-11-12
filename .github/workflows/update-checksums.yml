@@ -28,6 +28,22 @@ jobs:
     # Resource caps (review phlix-plugins__seceng M-PHLIX-PLUGINS-09): the job
     # sweeps ~40 repos x 2 tarballs + git pushes; 30 min is generous headroom
     # and still far below GitHub's 6h default, so a hung fetch cannot squat.
+    # Fetch-budget derivation (review CAT-9) — the per-fetch and job caps do NOT
+    # nest, by design: each archive fetch is bounded by curl --max-time 120
+    # (fetchTargetTarball), so the 1800 s job budget absorbs at most 1800/120 =
+    # 15 fully-stalled fetches, while a sweep issues up to 2 per discovered repo
+    # (~21 repos today => ~42 fetches => 84 min worst case if EVERY fetch hit
+    # its cap). The per-fetch cap bounds ONE stalled CDN connection; the job cap
+    # bounds a MASS stall (e.g. codeload throttling the whole runner IP) and is
+    # the binding backstop there. That is fail-safe: a run killed mid-sweep dies
+    # before the commit/push steps, so the catalog keeps its last pins and the
+    # next scheduled run re-sweeps. Healthy fetches take seconds — the
+    # `fetch census:` line at the end of "Compute updated checksums" logs the
+    # real count, total/slowest wall time and curl timeouts of every run, so
+    # drift toward the budget is visible before it bites. Do NOT raise this cap
+    # to "fit" the worst case (that reopens the hang-squat window) and keep
+    # FETCH_MAX_TIME_S / JOB_TIMEOUT_S in the updater in lockstep with both
+    # literals (pinned by test_fetch_census_constants_track_the_live_caps).
     timeout-minutes: 30
     steps:
       - name: Refuse to run outside the official repo
@@ -105,6 +121,11 @@ jobs:
           const SAFE_TAG_RE = '/^[A-Za-z0-9._\/-]+$/';
           const SHA40_RE = '/^[0-9a-f]{40}$/';
           const SHA64_RE = '/^[0-9a-f]{64}$/';
+          // Fetch-budget census inputs (review CAT-9): mirrors of the per-fetch
+          // curl --max-time literal in fetchTargetTarball() and the job's
+          // timeout-minutes (x60). Log-only — they never bound anything themselves.
+          const FETCH_MAX_TIME_S = 120;
+          const JOB_TIMEOUT_S = 1800;
           // Catalog tag bounds (seceng M-PHLIX-PLUGINS-12) — kept byte-equivalent to
           // plugins.schema.json's tags.items.pattern/maxItems and the catalog-gate.jq
           // mirror, so the updater can never WRITE a catalog its own gate rejects.
@@ -174,6 +195,21 @@ jobs:
               // plugins.json read (M-PHLIX-PLUGINS-05: the sim seam is complete —
               // an untouched default reproduces CI byte-for-byte).
               return envOr('PHLIX_STATE_DIR', '/tmp');
+          }
+
+          // Fetch census (review CAT-9): fetchTargetTarball() records every archive
+          // fetch's wall time and curl exit here; the job-end census line reads the
+          // totals back (call with no arguments). Observability only — no gate.
+          function fetchCensus(?float $seconds = null, string $curlExit = ''): array
+          {
+              static $census = ['fetches' => 0, 'seconds' => 0.0, 'slowest' => 0.0, 'timeouts' => 0];
+              if ($seconds !== null) {
+                  $census['fetches']++;
+                  $census['seconds'] += $seconds;
+                  if ($seconds > $census['slowest']) $census['slowest'] = $seconds;
+                  if ($curlExit === '28') $census['timeouts']++; // CURLE_OPERATION_TIMEDOUT
+              }
+              return $census;
           }
 
           function skipFetch(): bool
@@ -352,10 +388,12 @@ jobs:
               // partial body BEFORE it is trusted. PHP's single-quoted string keeps '\t' as
               // the two-character literal and curl renders that literal into a real tab;
               // the effective URL never contains a tab, so the strrpos split below is exact.
+              $fetchStart = microtime(true);
               $rawFetch = trim((string) shell_exec('curl -fsSL --max-time 120 "https://github.com/detain/' . $name . '/archive/' . $sha . '.tar.gz" -o ' . $tarball . ' -w \'%{url_effective}\t%{exitcode}\' 2>/dev/null'));
               $tabPos = strrpos($rawFetch, "\t");
               $effective = $tabPos === false ? $rawFetch : substr($rawFetch, 0, $tabPos);
               $curlExit = $tabPos === false ? '' : substr($rawFetch, $tabPos + 1);
+              fetchCensus(microtime(true) - $fetchStart, $curlExit);
               // Fail closed on ANY non-zero curl transfer status: a hard failure prints no
               // -w output at all ($curlExit === ''), a partial transfer reports its exit
               // code (e.g. 18). Both must never reach hashing. Only the literal '0' passes.
@@ -1197,6 +1235,26 @@ jobs:
               }
               if (file_put_contents($summaryFile, $md, FILE_APPEND) === false) {
                   echo "WARN: could not append the stale-pin section to GITHUB_STEP_SUMMARY (non-fatal)\n";
+              }
+          }
+
+          // Fetch census (review CAT-9): the per-fetch cap (FETCH_MAX_TIME_S) and the
+          // job cap (JOB_TIMEOUT_S) deliberately do not nest — see the derivation at
+          // timeout-minutes. Log the real numbers every run so a sweep creeping toward
+          // the job budget is visible on green runs. Log-only by contract: this block
+          // never exits and never touches the write decision.
+          $census = fetchCensus();
+          $censusLine = 'fetch census: ' . $census['fetches'] . ' archive fetch(es), '
+              . sprintf('%.1f', $census['seconds']) . 's total wall, slowest '
+              . sprintf('%.1f', $census['slowest']) . 's, ' . $census['timeouts']
+              . ' curl timeout(s) (cap ' . FETCH_MAX_TIME_S . 's each); worst case '
+              . $census['fetches'] . ' x ' . FETCH_MAX_TIME_S . 's = ' . ($census['fetches'] * FETCH_MAX_TIME_S)
+              . 's vs ' . JOB_TIMEOUT_S . 's job budget'
+              . (skipFetch() ? ' [sim: PHLIX_SKIP_FETCH, no fetches issued]' : '') . ' (CAT-9)';
+          echo $censusLine . "\n";
+          if (is_string($summaryFile) && $summaryFile !== '') {
+              if (file_put_contents($summaryFile, "\n## Fetch census\n\n`" . $censusLine . "`\n", FILE_APPEND) === false) {
+                  echo "WARN: could not append the fetch census to GITHUB_STEP_SUMMARY (non-fatal)\n";
               }
           }
 

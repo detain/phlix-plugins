@@ -1659,5 +1659,71 @@ class TestWorkflowContract:
         block = "\n".join(ln for ln in update_wf[i:j].splitlines() if not self._is_comment(ln))
         assert "::warning::stale-pin repos: " in block
         assert "## Stale pins" in block and "GITHUB_STEP_SUMMARY" in block
-        assert "exit(" not in block and "exit 1" not in block, "stale-pin surfacing must never exit"
+        assert "exit(" not in block and "exit 1" not in block and "die(" not in block and "throw " not in block, "stale-pin surfacing must never exit"
         assert "$changed" not in block, "stale-pin surfacing must not touch the write decision"
+
+    def test_fetch_census_constants_track_the_live_caps(self, update_wf):
+        """(CAT-9) The census reports against FETCH_MAX_TIME_S / JOB_TIMEOUT_S;
+        they must mirror the pinned curl --max-time literal and the job's
+        timeout-minutes, and the derivation comment must sit at the cap. Neither
+        cap is changed here — a drift on either side reddens."""
+        max_time = re.search(r"shell_exec\('curl -fsSL --max-time (\d+) ", update_wf)
+        assert max_time, "fetchTargetTarball curl line lost its --max-time literal"
+        timeout = re.findall(r"^    timeout-minutes:\s*(\d+)\s*$", update_wf, re.M)
+        assert len(timeout) == 1, f"expected one job timeout-minutes, got {timeout}"
+        assert f"const FETCH_MAX_TIME_S = {max_time.group(1)};" in update_wf
+        assert f"const JOB_TIMEOUT_S = {int(timeout[0]) * 60};" in update_wf
+        assert "Fetch-budget derivation (review CAT-9)" in update_wf
+        i = update_wf.index("Fetch-budget derivation (review CAT-9)")
+        assert update_wf.index("timeout-minutes:", i) - i < 2000, "derivation must sit at the job cap"
+
+    def test_fetch_census_block_never_gates(self, update_wf):
+        """(CAT-9) The job-end census is log-only: it records every archive fetch
+        (fetchCensus() call right after the curl line) and the surfacing block
+        between its header and the final sort neither exits nor flips $changed."""
+        i_curl = update_wf.index("shell_exec('curl -fsSL --max-time ")
+        i_note = update_wf.index("fetchCensus(microtime(true) - $fetchStart, $curlExit);", i_curl)
+        assert i_note < update_wf.index("if ($curlExit !== '0')", i_curl), \
+            "census must count the fetch BEFORE the fail-closed early returns"
+        i = update_wf.index("// Fetch census (review CAT-9): the per-fetch cap")
+        j = update_wf.index("usort($plugins['plugins']", i)
+        block = "\n".join(ln for ln in update_wf[i:j].splitlines() if not self._is_comment(ln))
+        assert "'fetch census: '" in block and "## Fetch census" in block
+        assert "exit(" not in block and "exit 1" not in block and "die(" not in block and "throw " not in block
+        assert "$changed" not in block
+
+    def test_fetch_census_line_on_a_sim_run(self, update_wf, plugins, tmp_path):
+        """(CAT-9) End-to-end through the sim seam: the census line and its step
+        summary section are emitted on a green run (zero fetches in sim mode)."""
+        php = shutil.which("php")
+        if php is None:  # pragma: no cover - ubuntu runners ship php; the updater itself requires it
+            pytest.skip("php binary unavailable in this venue")
+        name = "phlix-plugin-anidb"
+        assert name in {p["name"] for p in plugins}, f"fixture name {name} drifted from the live catalog"
+        script = tmp_path / "updater.php"
+        script.write_text(self._extract_updater_php(update_wf))
+        state = tmp_path / "state"
+        state.mkdir()
+        (state / "plugins.json").write_text(json.dumps({"schemaVersion": 2, "plugins": plugins}))
+        (state / f"ref_{name}.txt").write_text("a" * 40 + "\n")
+        (state / f"sha256_{name}.txt").write_text("0" * 64 + "\n")
+        (state / f"topics_{name}.json").write_text('["anime"]\n')
+        summary = tmp_path / "step_summary.md"
+        summary.write_text("")
+        env = {
+            "PATH": "/usr/bin:/bin",
+            "PHLIX_STATE_DIR": str(state),
+            "PHLIX_SKIP_FETCH": "1",
+            "PHLIX_DISCOVERY_JSON": json.dumps([name]),
+            "GITHUB_WORKSPACE": str(tmp_path),
+            "GITHUB_OUTPUT": str(tmp_path / "gh_output"),
+            "GITHUB_STEP_SUMMARY": str(summary),
+        }
+        r = subprocess.run([php, str(script)], env=env, capture_output=True, text=True, timeout=60)
+        assert r.returncode == 0, f"census must never fail the job (exit {r.returncode}): {r.stderr}\n{r.stdout}"
+        census = [ln for ln in r.stdout.splitlines() if ln.startswith("fetch census: ")]
+        assert len(census) == 1, f"expected one census line, got: {r.stdout}"
+        assert census[0].startswith("fetch census: 0 archive fetch(es), 0.0s total wall"), census[0]
+        assert "0 x 120s = 0s vs 1800s job budget" in census[0], census[0]
+        assert "[sim: PHLIX_SKIP_FETCH" in census[0] and census[0].endswith("(CAT-9)"), census[0]
+        assert "\n## Fetch census\n" in summary.read_text()
