@@ -63,8 +63,14 @@ on:
   # Python; workflow content only changes on human pushes anyway). Off-peak
   # minute, no new trust surface — minutes of runner time for continuous
   # attestation of master.
+  # Window (review CAT-8): 06:47 UTC sits OUTSIDE the updater's 06:00 cron run
+  # (update-checksums.yml '0 */6 * * *', timeout-minutes: 30 => done by 06:30),
+  # so the daily attestation does not check out master mid-sweep. It still
+  # attests master AS OF ITS CHECKOUT only: a dispatch-triggered updater push
+  # that lands after checkout is attested by the next daily run (or the next
+  # human push) — self-correcting, never a hole.
   schedule:
-    - cron: '17 6 * * *'
+    - cron: '47 6 * * *'
 
 permissions:
   contents: read
@@ -210,6 +216,9 @@ jobs:
             curl -fsSL --max-time 120 -o "${tarball}" "${url}" || rc=$?
             if [ "${rc}" -ne 0 ]; then
               echo "FETCH-FAIL (TRANSIENT, not drift): curl exit ${rc} for ${url} — pin NOT verified"
+              if [ "${rc}" -eq 22 ]; then
+                echo "  (curl 22 = HTTP error: if a re-run repeats it, the pinned ref/repo is likely gone — not a CDN hiccup)"
+              fi
               echo "::endgroup::"
               fetchfail=1
               continue

@@ -1505,6 +1505,24 @@ class TestWorkflowContract:
             f"validate-catalog schedule must fire daily, got cron {m.group(1)!r}"
         )
 
+    def test_daily_attestation_clears_the_updater_cron_window(self, validate_wf, update_wf):
+        """(CAT-8) The daily attestation must not fire inside an updater cron run:
+        the updater fires at minute 0 of every 6th hour and may run for its whole
+        timeout-minutes, so an attestation in that window would check out master
+        mid-sweep. Moving either cron or the cap reddens here."""
+        v = re.search(r"\n {2}schedule:\n(?:.*\n)*? {4}- cron: '([^']+)'", validate_wf)
+        u = re.search(r"\n {2}schedule:\n(?:.*\n)*? {4}- cron: '([^']+)'", update_wf)
+        assert v and u
+        assert u.group(1) == "0 */6 * * *", "updater cadence changed — re-derive the attestation window"
+        cap = int(re.findall(r"\n {4}timeout-minutes: (\d+)", update_wf)[0])
+        minute, hour = (int(f) for f in v.group(1).split()[:2])
+        if hour % 6 == 0:
+            assert minute > cap, (
+                f"validate-catalog cron {v.group(1)!r} lands inside the updater's "
+                f"{hour:02d}:00 run window (timeout-minutes: {cap})"
+            )
+        assert "attests master AS OF ITS CHECKOUT" in validate_wf
+
     def test_push_step_deepens_history_before_the_rebase_loop(self, update_wf):
         """(PG-117 — review plugins-catalog__devops #4[i]) The checkout is
         fetch-depth: 1; a shallow clone cannot rebase over a master that advanced
