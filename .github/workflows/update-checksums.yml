@@ -12,6 +12,13 @@ on:
   schedule:
     - cron: '0 */6 * * *'
 
+# Coalesce overlapping updater runs (review CAT-2): dispatch bursts, master
+# pushes and the 6h cron can otherwise race on the same catalog commit. Queue,
+# never cancel — an in-flight run may be mid-push.
+concurrency:
+  group: update-checksums
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
