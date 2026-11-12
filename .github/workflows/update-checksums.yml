@@ -1211,8 +1211,26 @@ jobs:
           # a failed deepen is non-fatal — the loud retry loop remains the safety net.
           git fetch --deepen=50 || echo "WARN: history deepen failed; the rebase below may hit a shallow merge base"
           # retry pull-rebase-push so cron runs don't clobber concurrent pushes; fail LOUDLY if it can't land
+          #
+          # Re-gate AFTER every rebase, BEFORE every push (review CAT-1): the
+          # "Validate catalog before push" step attested the COMPUTED file, but the
+          # rebase below replays our commit onto whatever master became mid-run, and
+          # the MERGED bytes are what actually land. A concurrent catalog commit can
+          # combine with ours into an out-of-order or duplicate-(name, version)
+          # catalog no gate ever saw — and bot pushes never re-trigger
+          # validate-catalog.yml. So the same canonical scripts/catalog-gate.jq runs
+          # on the rebased tree each attempt. On red: drop the local commit back to
+          # the fetched upstream and exit loud WITHOUT pushing; the next cron run
+          # re-sweeps from fresh master.
           for i in 1 2 3; do
-            if git pull --rebase --autostash && git push; then exit 0; fi
+            if git pull --rebase --autostash; then
+              if ! jq -e -r -f scripts/catalog-gate.jq plugins.json; then
+                echo "ERROR: rebased catalog fails scripts/catalog-gate.jq (attempt $i) — NOT pushing; next cron re-sweeps fresh (CAT-1)" >&2
+                git reset --hard '@{upstream}' || echo "WARN: could not reset to upstream after re-gate red (ephemeral runner; nothing was pushed)" >&2
+                exit 1
+              fi
+              if git push; then exit 0; fi
+            fi
             sleep 5
           done
           echo "ERROR: could not push catalog update after 3 attempts" >&2

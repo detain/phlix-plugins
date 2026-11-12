@@ -1515,6 +1515,47 @@ class TestWorkflowContract:
         i_rebase = update_wf.index("git pull --rebase --autostash")
         assert i_deepen < i_rebase, "deepen must precede the rebase retry loop"
 
+    def test_push_loop_regates_the_catalog_after_rebase_before_push(self, update_wf):
+        """(CAT-1 — review plugins-catalog) The pre-push validate step attests
+        the COMPUTED file, but the retry loop then `git pull --rebase`s it onto
+        whatever master became mid-run and pushes the MERGED bytes unattested:
+        a concurrent catalog commit can combine with ours into an out-of-order
+        or duplicate-(name, version) catalog that no gate ever saw (bot pushes
+        never re-trigger validate-catalog.yml). The canonical gate must re-run
+        INSIDE the loop, after the rebase and before the push, and a red there
+        must exit non-zero before any push. Symmetric to the deepen pin above;
+        matched on non-comment command lines only so explanatory comments can
+        never satisfy it."""
+        start = update_wf.index("      - name: Push changes\n")
+        nxt = update_wf.find("\n      - name:", start + 1)
+        push_step = update_wf[start:] if nxt == -1 else update_wf[start:nxt]
+        loop_open = "\n          for i in 1 2 3; do\n"
+        assert loop_open in push_step, "push retry loop vanished or changed shape"
+        loop_body = push_step[push_step.index(loop_open) + len(loop_open):]
+        loop_body = loop_body[: loop_body.index("\n          done\n")]
+        # Code only: drop whole-line comments AND trailing ` # ...` comments, so
+        # `if false; then # jq ... catalog-gate.jq` cannot pass as a gate.
+        cmds = [ln.split(" #", 1)[0] for ln in loop_body.splitlines()
+                if ln.strip() and not self._is_comment(ln)]
+
+        def first(pred, what):
+            for idx, ln in enumerate(cmds):
+                if pred(ln):
+                    return idx
+            raise AssertionError(f"push retry loop has no {what} command line")
+
+        i_rebase = first(lambda ln: "git pull --rebase --autostash" in ln, "pull-rebase")
+        i_gate = first(lambda ln: "jq -e -r -f scripts/catalog-gate.jq plugins.json" in ln,
+                       "catalog re-gate (CAT-1: rebased bytes pushed unattested)")
+        i_push = first(lambda ln: re.search(r"(^|[\s;&|(])git push\b", ln) is not None, "git push")
+        assert i_rebase < i_gate < i_push, (
+            "the catalog re-gate must run AFTER the rebase and BEFORE the push "
+            f"(rebase@{i_rebase}, gate@{i_gate}, push@{i_push})"
+        )
+        assert any(re.search(r"\bexit [1-9]", ln) for ln in cmds[i_gate:i_push]), (
+            "a red re-gate must exit non-zero before the push line is reachable"
+        )
+
     def test_push_step_stats_the_change_before_committing(self, update_wf):
         """(PG-118 — review plugins-catalog__devops #5[i]; teeth repair
         2026-11-06) `git diff --cached --stat` AFTER `git commit` always prints
