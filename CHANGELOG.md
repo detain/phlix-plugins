@@ -10,6 +10,20 @@ that record.
 
 ## Unreleased
 
+### Fixed — plugins-catalog fix program, round-2026-11-11 (2026-11-12)
+- validate-catalog.yml: daily attestation cron `17 6 * * *` -> `47 6 * * *` UTC, clearing the updater's 06:00-06:30 run window (CAT-8).
+- README truth pass (CAT-5/6/7/11/12): the bot-push trust-root note now names the
+  daily schedule as the attestation trigger that re-validates bot-era content
+  (pytest stays push/same-repo-PR only); the admission contract states the real
+  discovery filter (org + topic + not archived) and separates the updater's
+  pin-time manifest subset from the full phlix-shared schema check owned by the
+  downstream blocking manifest job; the `signature` cohort is re-counted at the
+  current pins (17 `null` incl. all twelve themes / 4 absent — the older entry
+  below records the count as of its own date); `title` carry documents the
+  three-tier ladder (own > carried sibling > derived); the simulation seam table
+  stops claiming `PHLIX_DISCOVERY_JSON` "may not be set" by anything else and
+  lists `GITHUB_WORKSPACE` as the write target to point at scratch.
+
 ### Fixed — review→fix wave 3, lane w06L10 (2026-11-06)
 - README: the Plugins table was regenerated from `plugins.json` — twelve rows were
   stale at the review commit (AniDB 0.3.0→0.4.1, AniList 0.2.0→0.4.0, Example

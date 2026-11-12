@@ -65,7 +65,8 @@ on:
   # attestation of master.
   # Window (review CAT-8): 06:47 UTC sits OUTSIDE the updater's 06:00 cron run
   # (update-checksums.yml '0 */6 * * *', timeout-minutes: 30 => done by 06:30),
-  # so the daily attestation does not check out master mid-sweep. It still
+  # so the daily attestation normally does not check out master mid-sweep (a
+  # delayed or queued updater run can still overlap — see below). It still
   # attests master AS OF ITS CHECKOUT only: a dispatch-triggered updater push
   # that lands after checkout is attested by the next daily run (or the next
   # human push) — self-correcting, never a hole.

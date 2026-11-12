@@ -135,14 +135,17 @@ Per-**entry** fields (each object in `plugins`):
 | `tags` | no | Bounded tags (lowercase-alnum `[._-]` charset, max 20 per entry — M-PHLIX-PLUGINS-12); the updater unions repo topics (minus a dynamic majority-family denylist **and** an owner-curated static floor such as `media-server`/`plex`/`composer-package`) with curated tags (minus the static floor only). |
 
 **Manifest-side note (`signature`) — recorded triage (LW-039).** The `signature` key in each
-plugin's own `plugin.json` — the manifest the admission contract validates — is optional in the
+plugin's own `plugin.json` — the manifest `validate-catalog.yml`'s blocking manifest job checks
+against the phlix-shared contract — is optional in the
 phlix-shared manifest contract: either a `sha256:<64-hex>` string or `null`, never in the required
 set, and the server's `SignatureVerifier` treats a missing key and a `null` value identically
-(accepted as unsigned, with a warning log). The official cohort's manifest shape is split today:
-five repos carry `"signature": null` (`phlix-plugin-anidb`, `phlix-plugin-myanimelist`,
-`phlix-plugin-omdb`, `phlix-plugin-opensubtitles`, and `phlix-plugin-example` — the copy-me
-template new plugins start from) while four carry no key at all (`phlix-plugin-trakt`,
-`phlix-plugin-lastfm`, `phlix-plugin-anilist`, `phlix-plugin-musicbrainz`). Both shapes validate
+(accepted as unsigned, with a warning log). The official cohort's manifest shape is split at the
+pins this catalog carries (re-counted 2026-11-12 across all 21 names, release and dev refs alike —
+each name's two refs agree): seventeen names carry `"signature": null` — `phlix-plugin-anidb`,
+`phlix-plugin-myanimelist`, `phlix-plugin-omdb`, `phlix-plugin-opensubtitles`,
+`phlix-plugin-example` (the copy-me template new plugins start from) and all twelve `ui-theme`
+plugins — while four carry no key at all (`phlix-plugin-trakt`, `phlix-plugin-lastfm`,
+`phlix-plugin-anilist`, `phlix-plugin-musicbrainz`). Both shapes validate
 and install identically, so this is cosmetic drift, not a defect — recorded here as **deliberately
 unnormalized** pending the owner signature-policy ruling (estate reel LW-098), which will decide
 whether to normalize the cohort or retire the copy-me `null` from the example.
@@ -158,10 +161,15 @@ do **not** re-trigger workflows — GitHub skips workflow starts for bot pushes
 made with that token. The bot's own pushes therefore pass only the structural
 gate (`scripts/catalog-gate.jq`, re-run inside the updater as a pre-push step:
 valid input, canonical order, pair uniqueness, schema-shape mirror,
-dev-never-verified); ajv's full schema check, the pytest suite, the pin-drift
-re-hash and the manifest-contract gate run against every HUMAN push and PR —
-including the human review push of a bot commit, which is how a bot-era
-regression still reaches a red gate. Trust-boundary decisions the structural
+dev-never-verified) at push time. `validate-catalog.yml` reaches bot-era content
+by its other triggers: its three data-trust legs — ajv's full schema check, the
+pin-drift re-hash and the blocking manifest-contract gate — run on every HUMAN
+push and PR **and on a daily schedule** (`47 6 * * *` UTC, clear of the
+updater's 06:00 run window), which re-attests `master` as of its checkout with
+no human push needed; the pytest suite runs on human pushes and same-repo PRs
+only (it executes repo Python — not on schedule, not on fork PRs). So a bot-era
+regression reaches a red gate at the next daily attestation, or sooner at the
+next human push (e.g. the review push of a bot commit). Trust-boundary decisions the structural
 gate cannot make (lineage of a carried `verified`, org ownership of a fetch
 target) are enforced inside the updater itself — see its workflow header.
 
@@ -173,10 +181,21 @@ is a **catalog generator**, not a checksum fixer: it rebuilds every *discovered*
 plugin's entry from the plugin repo's current state, then pushes when anything
 moved.
 
-- **Admission contract:** a plugin is in the official catalog iff its repo is in
-  the `detain` org, carries the `phlix-plugin` topic, and ships a `plugin.json`
-  that validates against the phlix-shared manifest contract. There is no
-  allow-list step — the topic IS the opt-in.
+- **Admission contract:** discovery admits a repo iff it is in the `detain` org,
+  carries the `phlix-plugin` topic, and is **not archived** (the Phase A topic
+  search keeps only `archived == false`; Phase B re-confirms the repo is still
+  `detain`-owned at that name). There is no allow-list step — the topic IS the
+  opt-in. Before writing an entry the updater gates only the **pin-time subset**
+  of the manifest contract: a parseable `plugin.json` whose `name` equals the
+  repo name and matches the plugin-name pattern, a `type` the catalog enum can
+  represent, and a semver `phlix_min_server_version` (the release leg re-checks
+  name / min-server / semver version on the TAGGED manifest and degrades to
+  dev-only on failure). Full phlix-shared manifest-schema conformance is **not**
+  checked by the updater — it is the downstream blocking manifest job in
+  `validate-catalog.yml`, on human pushes/PRs and the daily schedule (see the
+  trust-root note above). A repo that is archived or loses its topic drops out
+  of discovery: its existing entries are kept unchanged (named every run in a
+  `WARN … absent from discovery` line), not removed — see *Hand-repinning* below.
 - **Per discovered plugin:** a `release` entry at the latest semver tag (version
   read from that tag's `plugin.json`, `ref` = the tag commit, `artifactSha256` =
   sha256 of the codeload `archive/<ref>.tar.gz` bytes), plus a `dev` entry pinned
@@ -184,7 +203,9 @@ moved.
   `verified: false`). Release entries whose version no longer matches the latest
   tag are removed (stale-version cleanup); repo tags sync into `tags` minus a
   dynamic majority-family denylist and the owner-curated static floor.
-- **Curated fields survive roll-forwards:** `title` (own > derived), `summary`
+- **Curated fields survive roll-forwards:** `title` (three tiers: the entry's
+  own non-empty title > a curated title carried from a same-name sibling entry,
+  release entries preferred > derived from the repo name), `summary`
   and `description` carry forward; `verified` carries only while the pin ADVANCES
   along fast-forward lineage — a recreated tag (same version, new commit) or a
   non-ancestor pin move resets it to `false` (re-attestation, see the workflow
@@ -294,14 +315,18 @@ python3 -m pytest tests/ -v --tb=short --cov=. --cov-report=term-missing
 The updater is ~1,100 lines of PHP living inside a YAML heredoc — deliberate (the
 PHP-first single-job law keeps it next to its trigger), but it is still fully
 runnable **off** GitHub Actions against fixtures. Extract the script, then drive
-it with the four seam variables the script itself reads:
+it with the four `PHLIX_*` simulation seams the script reads, plus
+`GITHUB_WORKSPACE` (not a sim seam — the Actions variable naming where the
+rewrite is **written**; `GITHUB_OUTPUT` / `GITHUB_STEP_SUMMARY` are optional and
+simply skipped when unset):
 
 | Env var | Effect |
 |---|---|
-| `PHLIX_DISCOVERY_JSON` | JSON array of repo names — replaces the Phase A `gh api` topic search (nothing else may set it; without it, discovery hits GitHub live) |
+| `PHLIX_DISCOVERY_JSON` | JSON array of repo names — replaces the Phase A `gh api` topic search wholesale, so the org / topic / not-archived filter does not apply (each name must still pass the plugin-name guard). CI never sets it; unset or blank → discovery runs the live `gh api` search (needs an authenticated `gh`) |
 | `PHLIX_SKIP_FETCH` | any non-empty value — Phase B reads fixture state files instead of `gh`/`curl` |
 | `PHLIX_STATE_DIR` | where the Phase B state files AND the pristine `plugins.json` are read from (default `/tmp` — exactly what CI uses) |
 | `PHLIX_PHASE_B_ONLY` | any non-empty value — stop after Phase B, so Phase C merges can be re-run against the same captured state |
+| `GITHUB_WORKSPACE` | not a sim seam: the directory the rewritten `plugins.json` is **written** to (unset or blank → `.`, the current directory). In sim always point it at the scratch dir — run from the repo root without it, a changed run rewrites the checkout's `plugins.json` |
 
 ```bash
 scratch=$(mktemp -d /tmp/opencode/phlix-plugins-sim.XXXXXX)
@@ -320,7 +345,9 @@ printf '%s\n' "$(printf '0%.0s' $(seq 1 64))" > "$scratch/sha256_phlix-plugin-an
 printf '%s\n' '["anime","metadata"]' > "$scratch/topics_phlix-plugin-anidb.json"
 
 # 3. run the merge with GITHUB_WORKSPACE pointed at the SCRATCH copy — never
-#    the checkout — and read the rewrite back as a diff
+#    the checkout (the pristine read comes from PHLIX_STATE_DIR, the write goes
+#    to GITHUB_WORKSPACE; both are $scratch here) — and read the rewrite back
+#    as a diff
 PHLIX_STATE_DIR="$scratch" PHLIX_SKIP_FETCH=1 PHLIX_DISCOVERY_JSON='["phlix-plugin-anidb"]' \
   GITHUB_WORKSPACE="$scratch" php "$scratch/updater.php"
 diff "$scratch/plugins.json" plugins.json
