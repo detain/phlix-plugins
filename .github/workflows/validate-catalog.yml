@@ -170,7 +170,12 @@ jobs:
 
       - name: Verify each entry's artifactSha256 matches its pinned tarball
         run: |
-          set -u
+          # pipefail (review CAT-3): without it a `curl | sha256sum` pipeline takes
+          # sha256sum's status, so a failed download hashed the EMPTY stream and was
+          # misreported as DRIFT (e3b0c442...) — the WARN branch was unreachable.
+          # Fetches now go to a temp file with curl's own exit captured, so a
+          # TRANSIENT fetch failure is reported distinctly from DRIFT.
+          set -u -o pipefail
           # Input guard (review phlix-plugins__devops M-03): the loop below is fed by a
           # process substitution, so a jq crash or an unparseable/empty plugins.json
           # would feed it ZERO lines and the job would 'pass' having validated nothing.
@@ -184,7 +189,10 @@ jobs:
             exit 1
           fi
           drift=0
+          fetchfail=0
           checked=0
+          tarball="$(mktemp)"
+          trap 'rm -f "${tarball}"' EXIT
           # owner/repo are derived from the entry `repo` URL; ref + expected
           # digest come straight from the catalog.
           while IFS=$'\t' read -r name repo ref expected; do
@@ -194,14 +202,32 @@ jobs:
             url="https://github.com/${owner_repo}/archive/${ref}.tar.gz"
             echo "::group::${name}"
             echo "url: ${url}"
-            actual="$(curl -fsSL --max-time 120 "${url}" | sha256sum | cut -d' ' -f1)" || {
-              echo "WARN: could not download ${url}"
+            # Fetch-to-temp with an INDEPENDENT curl-exit check (same idiom as
+            # update-checksums.yml's %{exitcode} capture): -f fails on HTTP errors,
+            # and a mid-stream cut surfaces as a non-zero exit (e.g. 18/28/56).
+            : > "${tarball}"
+            rc=0
+            curl -fsSL --max-time 120 -o "${tarball}" "${url}" || rc=$?
+            if [ "${rc}" -ne 0 ]; then
+              echo "FETCH-FAIL (TRANSIENT, not drift): curl exit ${rc} for ${url} — pin NOT verified"
               echo "::endgroup::"
-              drift=1
+              fetchfail=1
               continue
-            }
+            fi
+            if [ ! -s "${tarball}" ]; then
+              echo "FETCH-FAIL (TRANSIENT, not drift): zero-byte body from ${url} — pin NOT verified"
+              echo "::endgroup::"
+              fetchfail=1
+              continue
+            fi
+            actual="$(sha256sum "${tarball}" | cut -d' ' -f1)"
             if [ "${actual}" = "${expected}" ]; then
               echo "OK: ${actual}"
+            elif ! gzip -t "${tarball}" 2>/dev/null; then
+              # Hash mismatch on a body that is not even a whole gzip stream is a
+              # broken transfer (or an error page), not evidence the pin moved.
+              echo "FETCH-FAIL (TRANSIENT, not drift): body from ${url} is not an intact gzip stream (hash ${actual}) — pin NOT verified"
+              fetchfail=1
             else
               echo "DRIFT: expected ${expected} but tarball hashes to ${actual}"
               drift=1
@@ -213,8 +239,16 @@ jobs:
             echo "ERROR: pin-drift visited ${checked} of ${total} catalog entries — coverage is not vacuous by luck" >&2
             exit 1
           fi
+          # Both outcomes stay BLOCKING (an unverified pin must not pass silently);
+          # they are reported distinctly so a CDN hiccup reads as "re-run", not
+          # as "a pin moved".
           if [ "${drift}" -ne 0 ]; then
-            echo "Pin drift detected — blocking on push, advisory on PRs. Review the entries above."
+            echo "Pin drift detected — blocking on push, advisory on PRs. Review the DRIFT entries above."
+          fi
+          if [ "${fetchfail}" -ne 0 ]; then
+            echo "Transient fetch failure(s) — the FETCH-FAIL pins above could not be verified; blocking on push, advisory on PRs. Re-run the job."
+          fi
+          if [ "${drift}" -ne 0 ] || [ "${fetchfail}" -ne 0 ]; then
             exit 1
           fi
           echo "All ${checked} pins match their tarballs."

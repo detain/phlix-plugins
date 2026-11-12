@@ -26,16 +26,18 @@ jobs:
   update-checksums:
     runs-on: ubuntu-26.04
     # Resource caps (review phlix-plugins__seceng M-PHLIX-PLUGINS-09): the job
-    # sweeps ~40 repos x 2 tarballs + git pushes; 30 min is generous headroom
-    # and still far below GitHub's 6h default, so a hung fetch cannot squat.
+    # sweeps ~21 repos x up to 2 tarballs (~42 fetches) + git pushes; 30 min is
+    # generous headroom and still far below GitHub's 6h default, so a hung
+    # fetch cannot squat.
     # Fetch-budget derivation (review CAT-9) — the per-fetch and job caps do NOT
     # nest, by design: each archive fetch is bounded by curl --max-time 120
     # (fetchTargetTarball), so the 1800 s job budget absorbs at most 1800/120 =
     # 15 fully-stalled fetches, while a sweep issues up to 2 per discovered repo
-    # (~21 repos today => ~42 fetches => 84 min worst case if EVERY fetch hit
-    # its cap). The per-fetch cap bounds ONE stalled CDN connection; the job cap
-    # bounds a MASS stall (e.g. codeload throttling the whole runner IP) and is
-    # the binding backstop there. That is fail-safe: a run killed mid-sweep dies
+    # (~21 repos today => ~42 fetches; a capped dev fetch skips that repo's
+    # release fetch, so at most ~21 caps => 42 min worst case). The per-fetch
+    # cap bounds ONE stalled CDN connection; the job cap bounds a MASS stall
+    # (e.g. codeload throttling the whole runner IP) and is the binding
+    # backstop there. That is fail-safe: a run killed mid-sweep dies
     # before the commit/push steps, so the catalog keeps its last pins and the
     # next scheduled run re-sweeps. Healthy fetches take seconds — the
     # `fetch census:` line at the end of "Compute updated checksums" logs the
