@@ -25,8 +25,10 @@ that record.
   lists `GITHUB_WORKSPACE` as the write target to point at scratch.
 - README: one-line footnote under the Plugins table records the owner ruling of
   2026-11-12 — the bare `phlix-plugin-phantom-mint` is retired, `phlix-plugin-phantom-mint-theme`
-  is kept; the bare name remains in the generator-owned catalog until its repo leaves
-  discovery (CAT-10). The admission-contract line now notes manifest `name` is only
+  is kept; the bare name remains in the generator-owned catalog while its repo is
+  still discovered, and once the repo is archived or loses its `phlix-plugin` topic
+  the updater keeps the entries unchanged, so they must then be hand-removed (see
+  *Hand-repinning*) (CAT-10). The admission-contract line now notes manifest `name` is only
   compared when present at HEAD (the tagged re-check requires it).
 
 ### Fixed — review→fix wave 3, lane w06L10 (2026-11-06)
