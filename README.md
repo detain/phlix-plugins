@@ -50,6 +50,8 @@ release tag is cut
 | Void Bloom Theme | `ui-theme` | 1.0.0 | ≥ 0.44.0 | false | [phlix-plugin-void-bloom-theme](https://github.com/detain/phlix-plugin-void-bloom-theme) |
 | Volcanic Ember Theme | `ui-theme` | 1.0.0 | ≥ 0.44.0 | false | [phlix-plugin-volcanic-ember-theme](https://github.com/detain/phlix-plugin-volcanic-ember-theme) |
 
+> **Phantom Mint duplicate:** the catalog carries two Phantom Mint `ui-theme` names. Owner ruling 2026-11-12: the bare `phlix-plugin-phantom-mint` is **retired** — install `phlix-plugin-phantom-mint-theme` (the kept, canonical repo). The bare name stays in `plugins.json` (and so in this machine-derived table) until its repo leaves discovery (topic dropped or archived), because the updater regenerates the catalog from discovery and cannot carry this ruling.
+
 ## Catalog format (`plugins.json`)
 
 The document shape is described by [`plugins.schema.json`](plugins.schema.json)
@@ -186,7 +188,7 @@ moved.
   search keeps only `archived == false`; Phase B re-confirms the repo is still
   `detain`-owned at that name). There is no allow-list step — the topic IS the
   opt-in. Before writing an entry the updater gates only the **pin-time subset**
-  of the manifest contract: a parseable `plugin.json` whose `name` equals the
+  of the manifest contract: a parseable `plugin.json` whose `name` (if present; the tagged re-check requires it) equals the
   repo name and matches the plugin-name pattern, a `type` the catalog enum can
   represent, and a semver `phlix_min_server_version` (the release leg re-checks
   name / min-server / semver version on the TAGGED manifest and degrades to
