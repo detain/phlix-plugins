@@ -592,9 +592,24 @@ jobs:
           // + topics; state files written to stateDir() (fixture mode reads the same layout)
           // ---------------------------------------------------------------------------
           $state = [];
+          // Stale-pin accounting (review CAT-4): every per-repo SKIP is logged and the
+          // job carries on (robustness contract), so a repo that keeps failing leaves
+          // its catalog entries frozen at their last pin on run after GREEN run, with
+          // the only evidence buried mid-log. Record each skipped name here across
+          // Phase B and Phase C — 'all' = the whole repo was skipped (every entry kept
+          // at its last pin), 'release' = only the release leg was (dev refreshed) —
+          // and surface them at job end as a ::warning:: plus a step-summary section.
+          // A SIGNAL, never a gate: nothing here may change the exit status.
+          $skipped = [];
+          $noteSkip = static function (string $skipName, string $scope) use (&$skipped): void {
+              if (($skipped[$skipName] ?? '') !== 'all') {
+                  $skipped[$skipName] = $scope;
+              }
+          };
           foreach ($repos as $name) {
               if (!is_string($name) || !preg_match(PLUGIN_NAME_RE, $name)) {
                   echo 'SKIP ' . logSafe(is_string($name) ? $name : var_export($name, true)) . ": invalid repo name\n";
+                  $noteSkip(is_string($name) ? $name : var_export($name, true), 'all');
                   continue;
               }
 
@@ -616,6 +631,7 @@ jobs:
                   $sha256 = is_file($shaFile) ? trim((string) file_get_contents($shaFile)) : '';
                   if (!preg_match(SHA40_RE, $ref) || !preg_match(SHA64_RE, $sha256)) {
                       echo 'SKIP ' . $name . ': no fixture state files in ' . $dir . "\n";
+                      $noteSkip($name, 'all');
                       continue;
                   }
                   $stateEntry = [
@@ -652,6 +668,7 @@ jobs:
               $meta = json_decode($metaJson, true);
               if (!is_array($meta) || !isset($meta['default_branch']) || !is_string($meta['default_branch'])) {
                   echo 'SKIP ' . $name . ': repo metadata fetch failed: ' . logSafe(trim($metaJson)) . "\n";
+                  $noteSkip($name, 'all');
                   continue;
               }
               // M-04 (review phlix-plugins__seceng): gh silently follows repo TRANSFERS —
@@ -662,6 +679,7 @@ jobs:
               $metaFullName = isset($meta['full_name']) && is_string($meta['full_name']) ? $meta['full_name'] : '';
               if ($metaOwner !== 'detain' || $metaFullName !== 'detain/' . $name) {
                   echo 'SKIP ' . $name . ": repo no longer detain-owned at this name (owner='" . logSafe($metaOwner) . "' full_name='" . logSafe($metaFullName) . "') — transfer/rename redirect detected\n";
+                  $noteSkip($name, 'all');
                   continue;
               }
               $branch = $meta['default_branch'] === '' ? 'master' : $meta['default_branch'];
@@ -669,6 +687,7 @@ jobs:
               // branch must never reach a shell string. Gate before use.
               if (!preg_match(SAFE_BRANCH_RE, $branch)) {
                   echo 'SKIP ' . $name . ": unsafe branch name '" . logSafe($branch) . "'\n";
+                  $noteSkip($name, 'all');
                   continue;
               }
               $topics = [];
@@ -679,6 +698,7 @@ jobs:
               $sha = trim((string) shell_exec('gh api repos/detain/' . $name . '/commits/' . $branch . ' --jq \'.sha\' 2>&1'));
               if (!preg_match(SHA40_RE, $sha)) {
                   echo 'SKIP ' . $name . ": invalid ref '" . logSafe($sha) . "'\n";
+                  $noteSkip($name, 'all');
                   continue;
               }
 
@@ -686,6 +706,7 @@ jobs:
               $dev = fetchTargetTarball($name, $sha, $dir, '');
               if ($dev === null) {
                   echo 'SKIP ' . $name . ": dev tarball fetch failed at HEAD '" . substr($sha, 0, 12) . "'\n";
+                  $noteSkip($name, 'all');
                   continue;
               }
               $stateEntry = [
@@ -712,6 +733,7 @@ jobs:
                   $release = fetchTargetTarball($name, $latest['sha'], $dir, '_tagged');
                   if ($release === null) {
                       echo 'SKIP ' . $name . ": release tarball fetch failed at tag '" . logSafe($latest['name']) . "' — keeping dev entry only\n";
+                      $noteSkip($name, 'release');
                   } else {
                       $stateEntry['tagged'] = [
                           'name' => $latest['name'],
@@ -805,20 +827,24 @@ jobs:
               $manifest = $st['manifest'];
               if (!is_array($manifest)) {
                   echo 'SKIP ' . $name . ": not a plugin (no valid plugin.json manifest)\n";
+                  $noteSkip($name, 'all');
                   continue;
               }
               $manifestName = isset($manifest['name']) && is_string($manifest['name']) ? $manifest['name'] : $name;
               if ($manifestName !== $name) {
                   echo 'SKIP ' . $name . ": manifest name '" . logSafe($manifestName) . "' does not match repo name\n";
+                  $noteSkip($name, 'all');
                   continue;
               }
               if (!preg_match(PLUGIN_NAME_RE, $manifestName)) {
                   echo 'SKIP ' . $name . ": manifest name '" . logSafe($manifestName) . "' is not a valid plugin name\n";
+                  $noteSkip($name, 'all');
                   continue;
               }
               $type = isset($manifest['type']) && is_string($manifest['type']) ? $manifest['type'] : '';
               if (!in_array($type, CATALOG_TYPES, true)) {
                   echo 'SKIP ' . $name . ": manifest type '" . logSafe($type) . "' not representable in catalog enum\n";
+                  $noteSkip($name, 'all');
                   continue;
               }
 
@@ -827,6 +853,7 @@ jobs:
                   : null;
               if ($devMinServer === null) {
                   echo 'SKIP ' . $name . ": HEAD plugin.json has no valid phlix_min_server_version — not a contract-valid plugin (existing entries stay pinned to their last valid ref)\n";
+                  $noteSkip($name, 'all');
                   continue;
               }
 
@@ -903,6 +930,7 @@ jobs:
                   }
                   if ($releaseSkipReason !== null) {
                       echo 'SKIP ' . $name . ': release entry skipped — ' . logSafe($releaseSkipReason) . " (keeping dev entry only)\n";
+                      $noteSkip($name, 'release');
                   } else {
                       $releaseType = (isset($tagManifest['type']) && is_string($tagManifest['type']) && in_array($tagManifest['type'], CATALOG_TYPES, true))
                           ? $tagManifest['type']
@@ -1121,6 +1149,57 @@ jobs:
                   . implode(', ', array_map('logSafe', array_keys($undiscovered))) . "\n";
           }
 
+          // Stale-pin surfacing (review CAT-4): name every repo skipped this run whose
+          // catalog entries therefore stayed at their last pin — on GREEN runs too,
+          // where nobody reads the mid-log SKIP lines. A whole-repo skip stales every
+          // entry of that name; a release-only skip stales the release entry, if one
+          // exists. Skipped names with no affected catalog entry are listed in the
+          // summary only (nothing went stale). Warning-only by contract: this block
+          // never exits and never touches $changed — skips are a signal, not a gate.
+          $catalogNames = [];
+          $catalogReleaseNames = [];
+          foreach ($plugins['plugins'] as $entry) {
+              $entryName = is_array($entry) ? ($entry['name'] ?? null) : null;
+              if (!is_string($entryName)) continue;
+              $catalogNames[$entryName] = true;
+              if (($entry['version'] ?? DEV_VERSION) !== DEV_VERSION) $catalogReleaseNames[$entryName] = true;
+          }
+          $stalePins = [];
+          $skippedUncataloged = [];
+          foreach ($skipped as $skipName => $scope) {
+              $skipName = (string) $skipName;
+              if ($scope === 'all' && isset($catalogNames[$skipName])) {
+                  $stalePins[] = logSafe($skipName);
+              } elseif ($scope === 'release' && isset($catalogReleaseNames[$skipName])) {
+                  $stalePins[] = logSafe($skipName) . ' (release entry)';
+              } else {
+                  $skippedUncataloged[] = logSafe($skipName);
+              }
+          }
+          if ($stalePins !== []) {
+              echo '::warning::stale-pin repos: ' . implode(', ', $stalePins)
+                  . " — skipped this run; catalog entries kept at their last pin (see SKIP lines above; CAT-4)\n";
+          }
+          $summaryFile = getenv('GITHUB_STEP_SUMMARY');
+          if (is_string($summaryFile) && $summaryFile !== '') {
+              $md = "## Stale pins\n\n";
+              if ($stalePins !== []) {
+                  $md .= 'Skipped this run — catalog entries kept at their last pin (signal, not a gate; the job stays green). See the `SKIP` lines in the log for each reason:' . "\n\n";
+                  foreach ($stalePins as $line) $md .= '- `' . $line . "`\n";
+              } else {
+                  $md .= "None — every discovered, cataloged repo was refreshed this run.\n";
+              }
+              if ($skippedUncataloged !== []) {
+                  $md .= "\nAlso skipped (no catalog entry affected): " . implode(', ', array_map(static fn (string $s): string => '`' . $s . '`', $skippedUncataloged)) . "\n";
+              }
+              if ($undiscovered !== []) {
+                  $md .= "\nRetained but absent from discovery (M-PHLIX-PLUGINS-11): " . implode(', ', array_map(static fn (string $s): string => '`' . logSafe($s) . '`', array_map('strval', array_keys($undiscovered)))) . "\n";
+              }
+              if (file_put_contents($summaryFile, $md, FILE_APPEND) === false) {
+                  echo "WARN: could not append the stale-pin section to GITHUB_STEP_SUMMARY (non-fatal)\n";
+              }
+          }
+
           usort($plugins['plugins'], static function (array $a, array $b): int {
               $an = isset($a['name']) && is_string($a['name']) ? $a['name'] : '';
               $bn = isset($b['name']) && is_string($b['name']) ? $b['name'] : '';
@@ -1225,6 +1304,7 @@ jobs:
           for i in 1 2 3; do
             if git pull --rebase --autostash; then
               if ! jq -e -r -f scripts/catalog-gate.jq plugins.json; then
+                echo >&2  # jq halt_error prints no trailing newline — keep the verdict on its own line
                 echo "ERROR: rebased catalog fails scripts/catalog-gate.jq (attempt $i) — NOT pushing; next cron re-sweeps fresh (CAT-1)" >&2
                 git reset --hard '@{upstream}' || echo "WARN: could not reset to upstream after re-gate red (ephemeral runner; nothing was pushed)" >&2
                 exit 1

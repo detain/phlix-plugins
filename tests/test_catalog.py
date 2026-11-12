@@ -1364,10 +1364,11 @@ class TestWorkflowContract:
         assert "strlen($value) > 80 ? substr($value, 0, 80)" in update_wf, (
             "logSafe must cap output at 80 chars"
         )
-        # def + 15 call sites (W-min85: 13; W-min86 tag-charset WARNs: +2); growth
-        # must be deliberate (rotate this pin). The -11 undiscovered-summary uses
-        # array_map('logSafe', ...) — callable-by-name, not counted here.
-        assert update_wf.count("logSafe(") == 16, "logSafe definition/call-site count moved"
+        # def + 19 call sites (W-min85: 13; W-min86 tag-charset WARNs: +2; CAT-4
+        # stale-pin warning/summary names: +4); growth must be deliberate (rotate
+        # this pin). The -11 undiscovered-summary uses array_map('logSafe', ...) —
+        # callable-by-name, not counted here.
+        assert update_wf.count("logSafe(") == 20, "logSafe definition/call-site count moved"
         for pin in (
             "(effective URL: '\" . logSafe($effective)",          # fork-guard refusal
             "raw output follows)\\n\" . logSafe($discoveryJson)",  # discovery dump
@@ -1575,3 +1576,88 @@ class TestWorkflowContract:
         i_stat = update_wf.index(stat_line)
         i_commit = update_wf.index("git commit -m 'chore(ci): update plugin catalog checksums'")
         assert i_stat < i_commit, "post-commit --cached stat prints nothing — move it before the commit"
+
+    @staticmethod
+    def _extract_updater_php(update_wf: str) -> str:
+        """The heredoc PHP body exactly as the README sim recipe extracts it
+        (body indented 10 spaces inside the 'Compute updated checksums' step)."""
+        start = update_wf.index("php << 'PHPEOF'\n") + len("php << 'PHPEOF'\n")
+        end = update_wf.index("\n          PHPEOF\n", start)
+        return "\n".join(
+            ln[10:] if ln.startswith(" " * 10) else ln
+            for ln in update_wf[start:end].splitlines()
+        ) + "\n"
+
+    def test_stale_pins_surface_as_warning_only_on_a_green_run(self, update_wf, plugins, tmp_path):
+        """(CAT-4 — review plugins-catalog) Every per-repo SKIP is logged and the
+        job carries on, so a repo that keeps failing stays frozen at its last pin
+        on run after GREEN run with only a mid-log SKIP line as evidence. The
+        updater must name those repos at job end — a `::warning::stale-pin repos:`
+        annotation plus a `## Stale pins` section on $GITHUB_STEP_SUMMARY — and it
+        must stay a SIGNAL, never a gate: exit status 0. Driven end-to-end
+        through the sim seam: one cataloged repo with no Phase B state (whole-repo
+        skip), one whose tag manifest is missing (release-only skip), one
+        skipped name that is not in the catalog (summary only, no warning)."""
+        php = shutil.which("php")
+        if php is None:  # pragma: no cover - ubuntu runners ship php; the updater itself requires it
+            pytest.skip("php binary unavailable in this venue")
+        names = {p["name"] for p in plugins}
+        fresh, frozen = "phlix-plugin-anidb", "phlix-plugin-lastfm"
+        uncataloged = "phlix-plugin-zz-not-in-catalog"
+        assert fresh in names and frozen in names and uncataloged not in names, \
+            f"fixture names drifted from the live catalog: {sorted(names)}"
+        script = tmp_path / "updater.php"
+        script.write_text(self._extract_updater_php(update_wf))
+        state = tmp_path / "state"
+        state.mkdir()
+        (state / "plugins.json").write_text(json.dumps({"schemaVersion": 2, "plugins": plugins}))
+        (state / f"ref_{fresh}.txt").write_text("a" * 40 + "\n")
+        (state / f"sha256_{fresh}.txt").write_text("0" * 64 + "\n")
+        (state / f"topics_{fresh}.json").write_text('["anime"]\n')
+        (state / f"manifest_{fresh}.json").write_text(json.dumps({
+            "name": fresh, "type": "metadata-provider", "version": "9.9.9",
+            "phlix_min_server_version": "1.0.0",
+        }))
+        # a tag whose manifest is absent -> release entry skipped, dev refreshed
+        (state / f"tagged_ref_{fresh}.txt").write_text("b" * 40 + "\n")
+        (state / f"tagged_sha256_{fresh}.txt").write_text("1" * 64 + "\n")
+        (state / f"tagged_name_{fresh}.txt").write_text("v9.9.9\n")
+        summary = tmp_path / "step_summary.md"
+        summary.write_text("")
+        env = {
+            "PATH": "/usr/bin:/bin",
+            "PHLIX_STATE_DIR": str(state),
+            "PHLIX_SKIP_FETCH": "1",
+            "PHLIX_DISCOVERY_JSON": json.dumps([fresh, frozen, uncataloged]),
+            "GITHUB_WORKSPACE": str(tmp_path),
+            "GITHUB_OUTPUT": str(tmp_path / "gh_output"),
+            "GITHUB_STEP_SUMMARY": str(summary),
+        }
+        r = subprocess.run([php, str(script)], env=env, capture_output=True, text=True, timeout=60)
+        assert r.returncode == 0, (
+            f"stale pins must WARN, never fail the job (exit {r.returncode}): {r.stderr}\n{r.stdout}"
+        )
+        warn = [ln for ln in r.stdout.splitlines() if ln.startswith("::warning::stale-pin repos: ")]
+        assert len(warn) == 1, f"expected one ::warning::stale-pin annotation, got: {r.stdout}"
+        assert frozen in warn[0], f"whole-repo skip {frozen} missing from the warning: {warn[0]}"
+        assert f"{fresh} (release entry)" in warn[0], f"release-only skip {fresh} missing: {warn[0]}"
+        assert uncataloged not in warn[0], "a skipped name with no catalog entry is not a stale pin"
+        assert "::error::" not in r.stdout
+        md = summary.read_text()
+        assert md.startswith("## Stale pins\n"), f"step summary lacks the Stale pins section: {md!r}"
+        assert f"`{frozen}`" in md and f"`{fresh} (release entry)`" in md
+        assert uncataloged in md, "uncataloged skips should still be listed in the summary"
+
+    def test_stale_pin_block_never_gates(self, update_wf):
+        """(CAT-4) Static half of the warning-only law: the surfacing block between
+        its header comment and the final sort contains no exit and never flips
+        $changed — a future edit turning the signal into a gate reddens here
+        even where php is unavailable."""
+        i = update_wf.index("// Stale-pin surfacing (review CAT-4)")
+        j = update_wf.index("usort($plugins['plugins']", i)
+        # Code only: comment prose may (and does) name $changed / exit.
+        block = "\n".join(ln for ln in update_wf[i:j].splitlines() if not self._is_comment(ln))
+        assert "::warning::stale-pin repos: " in block
+        assert "## Stale pins" in block and "GITHUB_STEP_SUMMARY" in block
+        assert "exit(" not in block and "exit 1" not in block, "stale-pin surfacing must never exit"
+        assert "$changed" not in block, "stale-pin surfacing must not touch the write decision"
