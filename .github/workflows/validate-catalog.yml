@@ -93,11 +93,11 @@ jobs:
 
       - name: Validate plugins.json against plugins.schema.json
         run: |
-          # ajv-cli 5.0.0 (ajv v8) for Draft 2020-12; ajv-formats 2.1.1 supplies
+          # ajv-cli 5.0.0 (ajv v8) for Draft 2020-12; ajv-formats 3.0.1 supplies
           # the `uri` format keyword the schema relies on. EXACT versions — npx
           # major-ranges (@5/@2) re-resolve to whatever upstream ships next
           # (review phlix-plugins__seceng M-07).
-          npx --yes --package ajv-cli@5.0.0 --package ajv-formats@2.1.1 -- \
+          npx --yes --package ajv-cli@5.0.0 --package ajv-formats@3.0.1 -- \
             ajv validate \
               --spec=draft2020 \
               -s plugins.schema.json \
@@ -344,9 +344,9 @@ jobs:
               echo "ERROR: ${name} has no plugin.json at the repo root"
               fail=1; rm -rf "${work}"; echo "::endgroup::"; continue
             fi
-            # ajv-cli 5.0.0 (ajv v8, Draft 2020-12) + ajv-formats 2.1.1 — exact
+            # ajv-cli 5.0.0 (ajv v8, Draft 2020-12) + ajv-formats 3.0.1 — exact
             # versions (M-07), same pins as the schema job.
-            if npx --yes --package ajv-cli@5.0.0 --package ajv-formats@2.1.1 -- \
+            if npx --yes --package ajv-cli@5.0.0 --package ajv-formats@3.0.1 -- \
                  ajv validate --spec=draft2020 --all-errors \
                    -s manifest.schema.json -d "${work}/plugin.json" -c ajv-formats; then
               echo "OK: ${name} manifest is valid"

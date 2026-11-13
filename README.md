@@ -290,7 +290,7 @@ To publish catalog changes to operators:
 ```bash
 # ajv-cli needs ajv-formats for the "uri" format keyword — exact versions, the
 # same pins the CI schema job uses (floating @5/@2 re-resolve to upstream-next):
-npx --yes -p ajv-cli@5.0.0 -p ajv-formats@2.1.1 ajv validate \
+npx --yes -p ajv-cli@5.0.0 -p ajv-formats@3.0.1 ajv validate \
   --spec=draft2020 -c ajv-formats -s plugins.schema.json -d plugins.json
 # or with check-jsonschema:
 #   python3 -m pip install check-jsonschema
