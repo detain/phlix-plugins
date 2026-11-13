@@ -1703,12 +1703,115 @@ class TestWorkflowContract:
         i_note = update_wf.index("fetchCensus(microtime(true) - $fetchStart, $curlExit);", i_curl)
         assert i_note < update_wf.index("if ($curlExit !== '0')", i_curl), \
             "census must count the fetch BEFORE the fail-closed early returns"
-        i = update_wf.index("// Fetch census (review CAT-9): the per-fetch cap")
-        j = update_wf.index("usort($plugins['plugins']", i)
+        i = update_wf.index("function emitFetchCensus(): void")
+        j = update_wf.index("function skipFetch(): bool", i)
         block = "\n".join(ln for ln in update_wf[i:j].splitlines() if not self._is_comment(ln))
         assert "'fetch census: '" in block and "## Fetch census" in block
         assert "exit(" not in block and "exit 1" not in block and "die(" not in block and "throw " not in block
         assert "$changed" not in block
+        # job-end call site: its surrounding block (up to the final sort) is gate-free too
+        k = update_wf.index("emitFetchCensus();\n", update_wf.index("// Fetch census (review CAT-9): the per-fetch cap"))
+        tail = "\n".join(ln for ln in update_wf[k:update_wf.index("usort($plugins['plugins']", k)].splitlines()
+                         if not self._is_comment(ln))
+        assert "exit(" not in tail and "$changed" not in tail
+        # CAT-S6: the all-skipped red path must emit the census BEFORE its exit(1)
+        guard = update_wf.index("if (count($state) === 0) {")
+        e = update_wf.index("exit(1);", guard)
+        assert "emitFetchCensus();" in update_wf[guard:e], "all-skipped exit(1) path lost its census"
+
+    def test_fetch_census_counts_samples_and_exit_28_timeouts(self, update_wf, tmp_path):
+        """(CAT-S6) Drive the real fetchCensus() with (seconds, curl exit) samples:
+        count, total, slowest, and ONLY exit '28' counted as a timeout. Deleting the
+        timeout counter (or the slowest tracking) reddens here."""
+        php = shutil.which("php")
+        if php is None:  # pragma: no cover
+            pytest.skip("php binary unavailable in this venue")
+        src = self._extract_updater_php(update_wf)
+        i = src.index("function fetchCensus(")
+        j = src.index("function emitFetchCensus(", i)
+        func = src[i:j]
+        func = func[:func.rindex("}") + 1]  # drop the emitter's leading comment
+        harness = tmp_path / "census.php"
+        harness.write_text(
+            "<?php\n" + func + "\n"
+            "echo json_encode(fetchCensus()), \"\\n\";\n"
+            "foreach ([[1.5, '0'], [30.25, '28'], [7.0, '22'], [120.0, '28'], [0.5, '']] as [$s, $x]) { fetchCensus($s, $x); }\n"
+            "echo json_encode(fetchCensus()), \"\\n\";\n"
+        )
+        r = subprocess.run([php, str(harness)], capture_output=True, text=True, timeout=60)
+        assert r.returncode == 0, r.stderr
+        before, after = (json.loads(x) for x in r.stdout.strip().splitlines())
+        assert before == {"fetches": 0, "seconds": 0, "slowest": 0, "timeouts": 0}
+        assert after["fetches"] == 5
+        assert after["timeouts"] == 2, "exactly the two exit-28 samples are timeouts"
+        assert after["slowest"] == 120.0
+        assert abs(after["seconds"] - 159.25) < 1e-9
+
+    def test_all_skipped_red_run_still_prints_the_census(self, update_wf, tmp_path):
+        """(CAT-S6) The 'all discovered repos skipped/failed' path exits 1, yet must
+        print the census line and summary section first."""
+        php = shutil.which("php")
+        if php is None:  # pragma: no cover
+            pytest.skip("php binary unavailable in this venue")
+        script = tmp_path / "updater.php"
+        script.write_text(self._extract_updater_php(update_wf))
+        state = tmp_path / "state"
+        state.mkdir()
+        (state / "plugins.json").write_text(json.dumps({"schemaVersion": 2, "plugins": []}))
+        summary = tmp_path / "step_summary.md"
+        summary.write_text("")
+        env = {
+            "PATH": "/usr/bin:/bin",
+            "PHLIX_STATE_DIR": str(state),
+            "PHLIX_SKIP_FETCH": "1",
+            "PHLIX_DISCOVERY_JSON": json.dumps(["phlix-plugin-no-fixture"]),
+            "GITHUB_WORKSPACE": str(tmp_path),
+            "GITHUB_OUTPUT": str(tmp_path / "gh_output"),
+            "GITHUB_STEP_SUMMARY": str(summary),
+        }
+        r = subprocess.run([php, str(script)], env=env, capture_output=True, text=True, timeout=60)
+        assert r.returncode == 1, f"all-skipped must stay a red run: {r.stderr}\n{r.stdout}"
+        assert "all discovered repos were skipped or failed" in r.stderr
+        assert any(ln.startswith("fetch census: ") for ln in r.stdout.splitlines()), r.stdout
+        assert "\n## Fetch census\n" in summary.read_text()
+
+    def test_pin_drift_step_keeps_the_cat3_fix(self, validate_wf, tmp_path):
+        """(CAT-S3) Pin the CAT-3 fix: the pin-drift run body has `set -u -o pipefail`,
+        no curl-fed `| sha256sum` pipeline, and keeps the fetchfail exit-1 branch.
+        Then run the extracted step with a fake curl: a failing curl must be reported
+        as FETCH-FAIL (never as DRIFT) and exit 1."""
+        marker = "      - name: Verify each entry's artifactSha256 matches its pinned tarball\n        run: |\n"
+        i = validate_wf.index(marker) + len(marker)
+        end = validate_wf.index("\n\n  manifest:", i)
+        body = "\n".join(ln[10:] if ln.startswith(" " * 10) else ln for ln in validate_wf[i:end].splitlines()) + "\n"
+        code = "\n".join(ln for ln in body.splitlines() if not self._is_comment(ln))
+        assert "set -u -o pipefail" in code
+        for ln in code.splitlines():
+            assert not ("curl" in ln and "sha256sum" in ln), f"curl-fed sha256sum pipeline: {ln}"
+            assert not (ln.lstrip().startswith("|") and "sha256sum" in ln), ln
+        assert "curl -fsSL" in code and "|| rc=$?" in code
+        assert 'if [ "${fetchfail}" -ne 0 ]; then' in code
+        assert 'if [ "${drift}" -ne 0 ] || [ "${fetchfail}" -ne 0 ]; then\n  exit 1\n' in code
+        if shutil.which("bash") is None or shutil.which("jq") is None:  # pragma: no cover
+            pytest.skip("bash/jq unavailable in this venue")
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        fake = bindir / "curl"
+        fake.write_text("#!/bin/sh\nexit 28\n")
+        fake.chmod(0o755)
+        work = tmp_path / "work"
+        work.mkdir()
+        (work / "plugins.json").write_text(json.dumps({"plugins": [
+            {"name": "p", "repo": "https://github.com/detain/phlix-plugin-x", "ref": "a" * 40, "artifactSha256": "0" * 64}
+        ]}))
+        (tmp_path / "step.sh").write_text(body)
+        env = {"PATH": f"{bindir}:/usr/bin:/bin", "HOME": str(tmp_path)}
+        r = subprocess.run(["bash", str(tmp_path / "step.sh")], cwd=work, env=env,
+                           capture_output=True, text=True, timeout=60)
+        assert r.returncode == 1, f"{r.stderr}\n{r.stdout}"
+        assert "FETCH-FAIL (TRANSIENT, not drift): curl exit 28" in r.stdout
+        assert "DRIFT:" not in r.stdout and "e3b0c442" not in r.stdout
+        assert "Transient fetch failure(s)" in r.stdout
 
     def test_fetch_census_line_on_a_sim_run(self, update_wf, plugins, tmp_path):
         """(CAT-9) End-to-end through the sim seam: the census line and its step

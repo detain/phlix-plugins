@@ -214,6 +214,30 @@ jobs:
               return $census;
           }
 
+          // Fetch census emitter (review CAT-9, CAT-S6): prints the census line and
+          // appends the step-summary section. Shared by the job-end path AND the
+          // 'all discovered repos skipped/failed' red-exit path, so the red run where
+          // the census explains the most still prints it. Log-only by contract: this
+          // function never exits, never throws and never touches the write decision.
+          function emitFetchCensus(): void
+          {
+              $census = fetchCensus();
+              $censusLine = 'fetch census: ' . $census['fetches'] . ' archive fetch(es), '
+                  . sprintf('%.1f', $census['seconds']) . 's total wall, slowest '
+                  . sprintf('%.1f', $census['slowest']) . 's, ' . $census['timeouts']
+                  . ' curl timeout(s) (cap ' . FETCH_MAX_TIME_S . 's each); worst case '
+                  . $census['fetches'] . ' x ' . FETCH_MAX_TIME_S . 's = ' . ($census['fetches'] * FETCH_MAX_TIME_S)
+                  . 's vs ' . JOB_TIMEOUT_S . 's job budget'
+                  . (skipFetch() ? ' [sim: PHLIX_SKIP_FETCH, no fetches issued]' : '') . ' (CAT-9)';
+              echo $censusLine . "\n";
+              $summaryFile = getenv('GITHUB_STEP_SUMMARY');
+              if (is_string($summaryFile) && $summaryFile !== '') {
+                  if (file_put_contents($summaryFile, "\n## Fetch census\n\n`" . $censusLine . "`\n", FILE_APPEND) === false) {
+                      echo "WARN: could not append the fetch census to GITHUB_STEP_SUMMARY (non-fatal)\n";
+                  }
+              }
+          }
+
           function skipFetch(): bool
           {
               return envOr('PHLIX_SKIP_FETCH', '') !== '';
@@ -802,6 +826,7 @@ jobs:
 
           if (count($state) === 0) {
               fwrite(STDERR, "ERROR: all discovered repos were skipped or failed — nothing to merge (auth/network problem?)\n");
+              emitFetchCensus(); // CAT-S6: the red run is where the census explains the most
               exit(1);
           }
 
@@ -1243,22 +1268,8 @@ jobs:
           // Fetch census (review CAT-9): the per-fetch cap (FETCH_MAX_TIME_S) and the
           // job cap (JOB_TIMEOUT_S) deliberately do not nest — see the derivation at
           // timeout-minutes. Log the real numbers every run so a sweep creeping toward
-          // the job budget is visible on green runs. Log-only by contract: this block
-          // never exits and never touches the write decision.
-          $census = fetchCensus();
-          $censusLine = 'fetch census: ' . $census['fetches'] . ' archive fetch(es), '
-              . sprintf('%.1f', $census['seconds']) . 's total wall, slowest '
-              . sprintf('%.1f', $census['slowest']) . 's, ' . $census['timeouts']
-              . ' curl timeout(s) (cap ' . FETCH_MAX_TIME_S . 's each); worst case '
-              . $census['fetches'] . ' x ' . FETCH_MAX_TIME_S . 's = ' . ($census['fetches'] * FETCH_MAX_TIME_S)
-              . 's vs ' . JOB_TIMEOUT_S . 's job budget'
-              . (skipFetch() ? ' [sim: PHLIX_SKIP_FETCH, no fetches issued]' : '') . ' (CAT-9)';
-          echo $censusLine . "\n";
-          if (is_string($summaryFile) && $summaryFile !== '') {
-              if (file_put_contents($summaryFile, "\n## Fetch census\n\n`" . $censusLine . "`\n", FILE_APPEND) === false) {
-                  echo "WARN: could not append the fetch census to GITHUB_STEP_SUMMARY (non-fatal)\n";
-              }
-          }
+          // the job budget is visible on green runs (emitFetchCensus(): log-only).
+          emitFetchCensus();
 
           usort($plugins['plugins'], static function (array $a, array $b): int {
               $an = isset($a['name']) && is_string($a['name']) ? $a['name'] : '';

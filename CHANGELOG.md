@@ -10,6 +10,10 @@ that record.
 
 ## Unreleased
 
+### Fixed — deferred minors (CAT-S3/CAT-S6, 2026-11-13)
+- update-checksums.yml: the fetch census is now an `emitFetchCensus()` helper and also runs on the "all discovered repos skipped/failed" red exit, so the failing run prints it too (log-only; never gates).
+- tests: the census is driven with (seconds, curl exit) samples incl. exit 28; the all-skipped census path and the CAT-3 pin-drift step (`set -u -o pipefail`, no curl-fed `sha256sum` pipe, fetchfail exit-1, fake-curl run) are pinned.
+
 ### Fixed — plugins-catalog fix program, round-2026-11-11 (2026-11-12)
 - validate-catalog.yml: daily attestation cron `17 6 * * *` -> `47 6 * * *` UTC, clearing the updater's 06:00-06:30 run window (CAT-8).
 - README truth pass (CAT-5/6/7/11/12): the bot-push trust-root note now names the
