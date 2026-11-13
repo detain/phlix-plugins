@@ -10,6 +10,10 @@ that record.
 
 ## Unreleased
 
+### Changed — dependency upgrade (2026-11-13)
+- Workflows: actions/checkout v6.1.0 -> v7.0.1, actions/setup-node v6.5.0 -> v7.1.0, actions/setup-python v5.6.0 -> v7.1.0 (SHA-pinned). Node 24 and Python 3.12 CI targets unchanged (still supported).
+- requirements-test.txt: coverage 7.17.0 -> 7.17.3 (hashes refreshed); every other pin was already the latest release.
+
 ### Fixed — deferred minors (CAT-S3/CAT-S6, 2026-11-13)
 - update-checksums.yml: the fetch census is now an `emitFetchCensus()` helper and also runs on the "all discovered repos skipped/failed" red exit, so the failing run prints it too (log-only; never gates).
 - tests: the census is driven with (seconds, curl exit) samples incl. exit 28; the all-skipped census path and the CAT-3 pin-drift step (`set -u -o pipefail`, no curl-fed `sha256sum` pipe, fetchfail exit-1, fake-curl run) are pinned.
