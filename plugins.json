@@ -21,7 +21,8 @@
         "anidb",
         "anime",
         "metadata",
-        "metadata-provider"
+        "metadata-provider",
+        "php8"
       ],
       "summary": "Anime metadata from AniDB.",
       "description": "AniDB metadata provider — anime titles, descriptions, episodes and ratings via the AniDB UDP API and daily title dump."
@@ -43,7 +44,8 @@
         "anidb",
         "anime",
         "metadata",
-        "metadata-provider"
+        "metadata-provider",
+        "php8"
       ]
     },
     {
@@ -119,6 +121,7 @@
         "jade",
         "mit-license",
         "oceanic",
+        "php8",
         "teal"
       ]
     },
@@ -141,6 +144,7 @@
         "jade",
         "mit-license",
         "oceanic",
+        "php8",
         "teal"
       ]
     },
@@ -166,6 +170,7 @@
         "emerald-abyss",
         "midnight",
         "oceanic",
+        "php8",
         "teal"
       ]
     },
@@ -191,6 +196,7 @@
         "emerald-abyss",
         "midnight",
         "oceanic",
+        "php8",
         "teal"
       ]
     },
@@ -208,7 +214,8 @@
       "yanked": false,
       "author": "detain",
       "tags": [
-        "metadata-provider"
+        "metadata-provider",
+        "php8"
       ]
     },
     {
@@ -225,7 +232,8 @@
       "yanked": false,
       "author": "detain",
       "tags": [
-        "metadata-provider"
+        "metadata-provider",
+        "php8"
       ]
     },
     {
@@ -405,7 +413,8 @@
         "manga",
         "metadata",
         "metadata-provider",
-        "myanimelist"
+        "myanimelist",
+        "php8"
       ],
       "summary": "Anime & manga metadata from MyAnimeList.",
       "description": "MyAnimeList metadata provider — anime/manga search, details and rankings via the MAL API v2."
@@ -429,7 +438,8 @@
         "manga",
         "metadata",
         "metadata-provider",
-        "myanimelist"
+        "myanimelist",
+        "php8"
       ]
     },
     {
@@ -450,6 +460,7 @@
         "design-system",
         "emerald",
         "mystic-jade",
+        "php8",
         "teal",
         "theming",
         "ui",
@@ -474,6 +485,7 @@
         "design-system",
         "emerald",
         "mystic-jade",
+        "php8",
         "teal",
         "theming",
         "ui",
@@ -659,7 +671,8 @@
         "midnight",
         "mint-theme",
         "mit-license",
-        "phantom-mint"
+        "phantom-mint",
+        "php8"
       ]
     },
     {
@@ -679,7 +692,8 @@
         "midnight",
         "mint-theme",
         "mit-license",
-        "phantom-mint"
+        "phantom-mint",
+        "php8"
       ]
     },
     {
@@ -754,6 +768,7 @@
         "design-system",
         "phantom-violet",
         "phantom-violet-theme",
+        "php8",
         "purple",
         "theming",
         "violet",
@@ -778,6 +793,7 @@
         "design-system",
         "phantom-violet",
         "phantom-violet-theme",
+        "php8",
         "purple",
         "theming",
         "violet",
@@ -807,6 +823,7 @@
         "dark-mode",
         "design-tokens",
         "high-contrast",
+        "php8",
         "theme",
         "ui-theme"
       ]
@@ -832,6 +849,7 @@
         "dark-mode",
         "design-tokens",
         "high-contrast",
+        "php8",
         "theme",
         "ui-theme"
       ]
@@ -1007,6 +1025,7 @@
         "design-system",
         "ember",
         "modern",
+        "php8",
         "theming",
         "volcanic-ember",
         "web-development"
@@ -1033,6 +1052,7 @@
         "design-system",
         "ember",
         "modern",
+        "php8",
         "theming",
         "volcanic-ember",
         "web-development"
